@@ -7,13 +7,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Calendar, ChevronLeft, ChevronRight, X } from 'lucide-react-native';
+import { Calendar, ChevronDown, ChevronLeft, ChevronRight, X } from 'lucide-react-native';
 import {
   formatDateYmd,
   formatExpiryDate,
   parseExpiryDateOnly,
 } from '@/utils/batchUtils';
 import { colors, appInputPlaceholderColor, appInputStyle } from '@/theme';
+import { SelectionModal } from '@/components/common/SelectionModal';
 
 type Props = {
   value: string | null | undefined;
@@ -68,6 +69,25 @@ export const ExpiryDatePickerField: React.FC<Props> = ({
   const [selected, setSelected] = useState<Date | null>(
     value ? parseExpiryDateOnly(value) : null,
   );
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const [yearPickerOpen, setYearPickerOpen] = useState(false);
+
+  const monthOptions = useMemo(
+    () => MONTHS.map((label, index) => ({ id: String(index), label })),
+    [],
+  );
+
+  // A few years back (for backdating older stock) through well past a typical
+  // shelf life, so any expiry date is reachable without endless scrolling.
+  const yearOptions = useMemo(() => {
+    const start = today.getFullYear() - 5;
+    const end = today.getFullYear() + 25;
+    const years: { id: string; label: string }[] = [];
+    for (let y = start; y <= end; y += 1) {
+      years.push({ id: String(y), label: String(y) });
+    }
+    return years;
+  }, [today]);
 
   const openPicker = () => {
     const parsed = value ? parseExpiryDateOnly(value) : null;
@@ -176,9 +196,24 @@ export const ExpiryDatePickerField: React.FC<Props> = ({
               <TouchableOpacity onPress={() => shiftMonth(-1)} style={styles.navBtn}>
                 <ChevronLeft size={20} color={colors.textSecondary} />
               </TouchableOpacity>
-              <Text style={styles.monthLabel}>
-                {MONTHS[viewMonth]} {viewYear}
-              </Text>
+              <View style={styles.monthYearGroup}>
+                <TouchableOpacity
+                  style={styles.dropdownBtn}
+                  onPress={() => setMonthPickerOpen(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Select month">
+                  <Text style={styles.monthLabel}>{MONTHS[viewMonth]}</Text>
+                  <ChevronDown size={16} color={colors.textSecondary} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.dropdownBtn}
+                  onPress={() => setYearPickerOpen(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Select year">
+                  <Text style={styles.monthLabel}>{viewYear}</Text>
+                  <ChevronDown size={16} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
               <TouchableOpacity onPress={() => shiftMonth(1)} style={styles.navBtn}>
                 <ChevronRight size={20} color={colors.textSecondary} />
               </TouchableOpacity>
@@ -219,6 +254,22 @@ export const ExpiryDatePickerField: React.FC<Props> = ({
           </View>
         </View>
       </Modal>
+
+      <SelectionModal
+        visible={monthPickerOpen}
+        title="Select month"
+        options={monthOptions}
+        onSelect={opt => setViewMonth(Number(opt.id))}
+        onClose={() => setMonthPickerOpen(false)}
+      />
+
+      <SelectionModal
+        visible={yearPickerOpen}
+        title="Select year"
+        options={yearOptions}
+        onSelect={opt => setViewYear(Number(opt.id))}
+        onClose={() => setYearPickerOpen(false)}
+      />
     </>
   );
 };
@@ -308,6 +359,20 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: colors.primarySoft,
+  },
+  monthYearGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dropdownBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
     backgroundColor: colors.primarySoft,
   },
   monthLabel: {

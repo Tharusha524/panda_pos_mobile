@@ -45,6 +45,11 @@ export const mergeReceiptPrintSettings = (
     base.footerMessage = serverFooter.trim();
   }
 
+  // All printouts are center-aligned system-wide — not user-configurable, so this
+  // always wins over any locally saved or server-provided alignment preference.
+  base.headerAlign = 'center';
+  base.bodyAlign = 'center';
+
   return base;
 };
 

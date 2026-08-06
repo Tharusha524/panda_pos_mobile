@@ -21,3 +21,31 @@ export const bytesToBase64 = (bytes: number[] | Uint8Array): string => {
   }
   return output;
 };
+
+export const base64ToBytes = (base64: string): Uint8Array => {
+  const normalized = base64.replace(/[^A-Za-z0-9+/=]/g, '');
+  const padding = normalized.endsWith('==') ? 2 : normalized.endsWith('=') ? 1 : 0;
+  const byteLength = (normalized.length * 3) / 4 - padding;
+  const bytes = new Uint8Array(byteLength);
+  let byteIndex = 0;
+
+  for (let i = 0; i < normalized.length; i += 4) {
+    const enc1 = BASE64_CHARS.indexOf(normalized[i]);
+    const enc2 = BASE64_CHARS.indexOf(normalized[i + 1]);
+    const enc3 = BASE64_CHARS.indexOf(normalized[i + 2]);
+    const enc4 = BASE64_CHARS.indexOf(normalized[i + 3]);
+    const chr1 = (enc1 << 2) | (enc2 >> 4);
+    const chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
+    const chr3 = ((enc3 & 3) << 6) | enc4;
+
+    bytes[byteIndex++] = chr1;
+    if (enc3 !== 64 && byteIndex < byteLength) {
+      bytes[byteIndex++] = chr2;
+    }
+    if (enc4 !== 64 && byteIndex < byteLength) {
+      bytes[byteIndex++] = chr3;
+    }
+  }
+
+  return bytes;
+};

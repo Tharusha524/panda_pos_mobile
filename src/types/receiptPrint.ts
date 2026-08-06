@@ -19,13 +19,13 @@ export interface ReceiptPrintCustomization {
 
 export const DEFAULT_RECEIPT_PRINT_CUSTOMIZATION: ReceiptPrintCustomization = {
   headerAlign: 'center',
-  bodyAlign: 'left',
+  bodyAlign: 'center',
   titleFont: 'bold',
   showLogo: true,
   showPhone: true,
   showEmail: true,
   showTaxId: true,
   showRegistration: true,
-  footerMessage: 'Thank you for your business!',
+  footerMessage: 'Thank You Come Again',
   paperWidth: '58mm',
 };

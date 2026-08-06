@@ -129,13 +129,17 @@ export const TodaySalesList: React.FC<{
             subtitle={row.customer_name?.trim() || 'Walk-in Customer'}
             amount={formatCurrency(row.amount, currency)}
             amountColor={isReturn ? colors.error : colors.primary}
-            meta={[row.location, row.time, row.payment_method]
-              .filter(Boolean)
-              .join(' · ')}
+            meta={[row.location, row.time].filter(Boolean).join(' · ')}
             accent={isReturn ? 'return' : 'default'}
             pill={
               <StatusPill
-                label={isReturn ? 'Return' : isHold ? 'Hold' : 'Paid'}
+                label={
+                  isReturn
+                    ? 'Return'
+                    : isHold
+                      ? 'Hold'
+                      : row.payment_method?.trim() || 'Paid'
+                }
                 tone={isReturn ? 'return' : isHold ? 'hold' : 'sale'}
               />
             }

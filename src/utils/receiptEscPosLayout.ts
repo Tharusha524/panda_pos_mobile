@@ -65,6 +65,27 @@ export const escDivider = (ctx: ReceiptLayoutContext, char = '-'): string =>
 export const escPadLine = (ctx: ReceiptLayoutContext, left: string, right: string): string =>
   escLine(ctx, padLine(left, right, ctx.lineWidth), 'left');
 
+export type TableColumn = {
+  text: string;
+  width: number;
+  align?: 'left' | 'right';
+};
+
+/** Fixed-width multi-column row (e.g. Item Name / Qty / Price / Amount), single space between columns. */
+export const escTableRow = (ctx: ReceiptLayoutContext, columns: TableColumn[]): string => {
+  const parts = columns.map(col => {
+    const text = col.text.length > col.width ? col.text.slice(0, col.width) : col.text;
+    const pad = ' '.repeat(col.width - text.length);
+    return col.align === 'right' ? pad + text : text + pad;
+  });
+  return escLine(ctx, parts.join(' '), 'left');
+};
+
+// Some locales format times with a narrow no-break space (U+202F) or similar before
+// AM/PM, which thermal printer fonts can't render (prints as "?"). Collapse any
+// non-ASCII whitespace down to a plain space so the printout stays clean.
+export const sanitizeForPrint = (text: string): string => text.replace(/[^\S\r\n]/g, ' ');
+
 /** Visible preview for customize screen (no ESC/POS tags). */
 export const previewLine = (
   ctx: ReceiptLayoutContext,

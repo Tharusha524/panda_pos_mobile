@@ -2,7 +2,11 @@ import React from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 import { HStack, Text, VStack } from '@gluestack-ui/themed';
 import { useReceiptLogoUri } from '@/hooks/useReceiptLogoUri';
-import { PURCHASE_RECEIPT_TITLE, RECEIPT_SOFTWARE_PROVIDER } from '@/constants/receiptBranding';
+import {
+  PURCHASE_RECEIPT_TITLE,
+  RECEIPT_SOFTWARE_PROVIDER,
+  RECEIPT_SOFTWARE_WEBSITE,
+} from '@/constants/receiptBranding';
 import { formatCurrency, getCurrencyLabel, resolveCurrencyCode } from '@/utils/format';
 import { formatReceiptQtyDetail, resolveLineUom } from '@/utils/uom';
 import { colors } from '@/theme';
@@ -130,6 +134,7 @@ export const PurchaseReceiptView: React.FC<PurchaseReceiptViewProps> = ({
       <View style={styles.divider} />
       <Text style={styles.thankYou}>Purchase recorded successfully</Text>
       <Text style={styles.softwareLine}>{RECEIPT_SOFTWARE_PROVIDER}</Text>
+      <Text style={styles.softwareLine}>{RECEIPT_SOFTWARE_WEBSITE}</Text>
       <Text style={styles.footerNote}>Printed: {printedAt}</Text>
     </View>
   );

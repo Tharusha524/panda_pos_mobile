@@ -89,6 +89,8 @@ export const SaleOrderScreen: React.FC = () => {
   const { error: posError, setError: setPosError } = pos;
 
   const [customerModal, setCustomerModal] = useState(false);
+  const [routeModal, setRouteModal] = useState(false);
+  const [routeFilter, setRouteFilter] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState(pos.paymentMethod);
   const [amountReceived, setAmountReceived] = useState('');
   const banks: BankAccount[] = [];
@@ -232,8 +234,10 @@ export const SaleOrderScreen: React.FC = () => {
   );
 
   useEffect(() => {
-    setAmountReceived(String(previewOrderTotal));
-  }, [previewOrderTotal]);
+    // Credit means nothing is collected at the point of sale — default to 0 so an
+    // un-edited field doesn't submit "fully paid" for a sale that's actually owed.
+    setAmountReceived(isCreditPayment(paymentMethod) ? '0' : String(previewOrderTotal));
+  }, [previewOrderTotal, paymentMethod]);
 
   useEffect(() => {
     setQtyDrafts(prev => {
@@ -329,26 +333,39 @@ export const SaleOrderScreen: React.FC = () => {
     [pos.items],
   );
 
+  const routeOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const c of pos.customers) {
+      const route = c.route?.trim();
+      if (route) {
+        seen.add(route);
+      }
+    }
+    return Array.from(seen).sort((a, b) => a.localeCompare(b));
+  }, [pos.customers]);
+
   const customerOptions = [
     { id: 'walk-in', label: 'Walk-in Customer', subtitle: 'Default' },
-    ...pos.customers.map(c => {
-      const balance =
-        (c.net_balance ?? 0) > 0
-          ? `Balance ${formatCurrency(c.net_balance, currency)}`
-          : null;
-      return {
-        id: String(c.id),
-        label: c.customer_name,
-        subtitle: [
-          c.customer_code ?? c.customer_id,
-          c.contact_no,
-          c.location,
-          balance,
-        ]
-          .filter(Boolean)
-          .join(' · '),
-      };
-    }),
+    ...pos.customers
+      .filter(c => !routeFilter || c.route === routeFilter)
+      .map(c => {
+        const balance =
+          (c.net_balance ?? 0) > 0
+            ? `Balance ${formatCurrency(c.net_balance, currency)}`
+            : null;
+        return {
+          id: String(c.id),
+          label: c.customer_name,
+          subtitle: [
+            c.customer_code ?? c.customer_id,
+            c.contact_no,
+            c.location,
+            balance,
+          ]
+            .filter(Boolean)
+            .join(' · '),
+        };
+      }),
   ];
 
   const commitLineQty = useCallback(
@@ -439,7 +456,10 @@ export const SaleOrderScreen: React.FC = () => {
 
   const deliverReceipt = async (receipt: SaleReceiptPayload) => {
     const activeCustomer = pos.customer;
-    const received = parseFloat(amountReceived.replace(/,/g, '')) || receipt.sale.net_amount;
+    // Same falsy-zero pitfall as the submission path — don't let a real 0 (Credit)
+    // fall back to net_amount.
+    const parsedReceived = parseFloat(amountReceived.replace(/,/g, ''));
+    const received = Number.isNaN(parsedReceived) ? receipt.sale.net_amount : parsedReceived;
     const receiptWithCustomerInfo: SaleReceiptPayload = {
       ...receipt,
       sale: {
@@ -564,7 +584,10 @@ export const SaleOrderScreen: React.FC = () => {
       return;
     }
 
-    const received = parseFloat(amountReceived) || previewOrderTotal;
+    // `|| previewOrderTotal` would silently turn a real "0" (Credit — nothing collected)
+    // back into the full total, since 0 is falsy — check for NaN specifically instead.
+    const parsedReceived = parseFloat(amountReceived);
+    const received = Number.isNaN(parsedReceived) ? previewOrderTotal : parsedReceived;
     const paymentNotes = buildPaymentNotes(paymentMethod, {
       reference: paymentReference,
       cardLast4: paymentCardLast4,
@@ -1113,6 +1136,41 @@ export const SaleOrderScreen: React.FC = () => {
           setCustomerModal(false);
           navigation.navigate('CustomerForm', { selectOnSave: true });
         }}
+        headerExtra={
+          routeOptions.length > 0 ? (
+            <Pressable
+              onPress={() => setRouteModal(true)}
+              flexDirection="row"
+              alignItems="center"
+              justifyContent="space-between"
+              px="$4"
+              py="$3"
+              borderBottomWidth={1}
+              borderColor={colors.border}>
+              <VStack>
+                <Text size="xs" color={colors.textMuted}>
+                  Route
+                </Text>
+                <Text fontWeight="$semibold" color={colors.text}>
+                  {routeFilter ?? 'All routes'}
+                </Text>
+              </VStack>
+              <ChevronRight size={16} color={colors.primaryLight} />
+            </Pressable>
+          ) : undefined
+        }
+      />
+
+      <SelectionModal
+        visible={routeModal}
+        title="Filter by route"
+        options={[
+          { id: '__all__', label: 'All routes' },
+          ...routeOptions.map(r => ({ id: r, label: r })),
+        ]}
+        onSelect={opt => setRouteFilter(opt.id === '__all__' ? null : opt.id)}
+        onClose={() => setRouteModal(false)}
+        emptyMessage="No routes"
       />
     </ScreenContainer>
   );

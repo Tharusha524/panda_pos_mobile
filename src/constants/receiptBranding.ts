@@ -1,5 +1,6 @@
 /** Shown at the bottom of every printed / on-screen receipt. */
-export const RECEIPT_SOFTWARE_PROVIDER = 'Sky Smart Technologies';
+export const RECEIPT_SOFTWARE_PROVIDER = 'Designed by DIO Solutions';
+export const RECEIPT_SOFTWARE_WEBSITE = 'dio.lk';
 
 export const DEFAULT_RECEIPT_STORE_NAME = 'Sales Receipt';
 

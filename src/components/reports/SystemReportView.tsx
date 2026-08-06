@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { HStack, Text, VStack } from '@gluestack-ui/themed';
-import { formatCurrency, resolveCurrencyCode } from '@/utils/format';
+import { formatCurrency, resolveCurrencyCode, parseBackendTimestamp } from '@/utils/format';
 import { colors } from '@/theme';
 import type { SystemReportPayload } from '@/types/reports';
 import type { PosMobileSettings } from '@/types/settings';
@@ -186,7 +186,7 @@ export const SystemReportView: React.FC<SystemReportViewProps> = ({
       {report.generated_at ? (
         <Text style={styles.mutedCenter}>
           Generated:{' '}
-          {new Date(report.generated_at.replace(' ', 'T')).toLocaleString(undefined, {
+          {parseBackendTimestamp(report.generated_at).toLocaleString(undefined, {
             dateStyle: 'medium',
             timeStyle: 'short',
           })}

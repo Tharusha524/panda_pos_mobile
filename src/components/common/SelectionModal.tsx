@@ -20,6 +20,8 @@ interface SelectionModalProps {
   emptyMessage?: string;
   footerActionLabel?: string;
   onFooterAction?: () => void;
+  /** Optional content rendered between the title bar and the list — e.g. a filter row. */
+  headerExtra?: React.ReactNode;
 }
 
 export const SelectionModal: React.FC<SelectionModalProps> = ({
@@ -31,6 +33,7 @@ export const SelectionModal: React.FC<SelectionModalProps> = ({
   emptyMessage = 'No options found',
   footerActionLabel,
   onFooterAction,
+  headerExtra,
 }) => (
   <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
     <View style={styles.overlay}>
@@ -50,6 +53,7 @@ export const SelectionModal: React.FC<SelectionModalProps> = ({
             <X size={22} color={colors.textSecondary} />
           </TouchableOpacity>
         </Box>
+        {headerExtra}
         {footerActionLabel && onFooterAction ? (
           <TouchableOpacity style={styles.footerAction} onPress={onFooterAction}>
             <Text fontWeight="$bold" color={colors.primary}>

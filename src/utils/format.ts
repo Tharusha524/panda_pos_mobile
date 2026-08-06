@@ -82,15 +82,38 @@ export const formatPrintAmount = (
   currency?: string | null,
 ): string => formatCurrency(value, currency);
 
+/** Plain "1,234.56" with no currency code/symbol — for receipt layouts that omit it. */
+export const formatPlainAmount = (value?: number | null): string =>
+  new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value ?? 0);
+
 export const formatNumber = (value?: number | null): string => {
   return new Intl.NumberFormat('en-US').format(value ?? 0);
+};
+
+/**
+ * Parse a backend timestamp correctly. Laravel/Carbon sends "YYYY-MM-DD HH:mm:ss" in
+ * UTC with no timezone marker. JS treats a date-TIME string with no offset as LOCAL
+ * time, not UTC — silently throwing every displayed/relative time off by the device's
+ * UTC offset (e.g. ~5.5h for Sri Lanka). Force UTC only when there's a time component
+ * and no explicit marker already; leave date-only or already-tagged strings untouched.
+ */
+export const parseBackendTimestamp = (dateStr: string): Date => {
+  const isoCandidate = dateStr.trim().replace(' ', 'T');
+  const hasTimeComponent = /T\d{2}:\d{2}/.test(isoCandidate);
+  const hasTimezoneMarker = /Z$|[+-]\d{2}:?\d{2}$/.test(isoCandidate);
+  const parseable =
+    hasTimeComponent && !hasTimezoneMarker ? `${isoCandidate}Z` : isoCandidate;
+  return new Date(parseable);
 };
 
 export const formatRelativeTime = (dateStr?: string | null): string => {
   if (!dateStr) {
     return '—';
   }
-  const date = new Date(dateStr.replace(' ', 'T'));
+  const date = parseBackendTimestamp(dateStr);
   if (Number.isNaN(date.getTime())) {
     return dateStr;
   }

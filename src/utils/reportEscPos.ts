@@ -1,7 +1,7 @@
 import type { PosMobileSettings } from '@/types/settings';
 import type { ReceiptPrintCustomization } from '@/types/receiptPrint';
 import type { SystemReportPayload } from '@/types/reports';
-import { resolveCurrencyCode, formatPrintAmount } from '@/utils/format';
+import { resolveCurrencyCode, formatPrintAmount, parseBackendTimestamp } from '@/utils/format';
 import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
 import {
   createReceiptLayout,
@@ -51,7 +51,7 @@ const appendHeader = (
     lines.push(escHeaderLine(ctx, report.subtitle));
   }
   if (report.generated_at) {
-    const printed = new Date(report.generated_at.replace(' ', 'T'));
+    const printed = parseBackendTimestamp(report.generated_at);
     const stamp = Number.isNaN(printed.getTime())
       ? report.generated_at
       : `${printed.toLocaleDateString()} ${printed.toLocaleTimeString([], {

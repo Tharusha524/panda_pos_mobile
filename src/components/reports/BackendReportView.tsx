@@ -5,7 +5,7 @@ import {
   ActivityDataTable,
   ActivityTableRow,
 } from '@/components/common/ActivityDataTable';
-import { formatCurrency, resolveCurrencyCode } from '@/utils/format';
+import { formatCurrency, resolveCurrencyCode, parseBackendTimestamp } from '@/utils/format';
 import { colors } from '@/theme';
 import type { BackendReportData } from '@/types/backendReports';
 import type { PosMobileSettings } from '@/types/settings';
@@ -141,7 +141,7 @@ export const BackendReportView: React.FC<BackendReportViewProps> = ({
       {report.generated_at ? (
         <Text style={styles.mutedCenter}>
           Generated:{' '}
-          {new Date(report.generated_at.replace(' ', 'T')).toLocaleString(undefined, {
+          {parseBackendTimestamp(report.generated_at).toLocaleString(undefined, {
             dateStyle: 'medium',
             timeStyle: 'short',
           })}

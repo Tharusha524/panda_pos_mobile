@@ -1,6 +1,14 @@
-import { RECEIPT_SOFTWARE_PROVIDER } from '@/constants/receiptBranding';
+import { RECEIPT_SOFTWARE_PROVIDER, RECEIPT_SOFTWARE_WEBSITE } from '@/constants/receiptBranding';
 import type { ReceiptPrintCustomization } from '@/types/receiptPrint';
-import { createReceiptLayout, escDivider, escHeaderLine, escPadLine, escTitleLine } from '@/utils/receiptEscPosLayout';
+import {
+  createReceiptLayout,
+  escDivider,
+  escHeaderLine,
+  escLine,
+  escPadLine,
+  escTitleLine,
+  sanitizeForPrint,
+} from '@/utils/receiptEscPosLayout';
 import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
 
 export const buildShortTestReceipt = (
@@ -10,19 +18,24 @@ export const buildShortTestReceipt = (
   const merged = mergeReceiptPrintSettings(null, customization);
   const ctx = createReceiptLayout(merged);
   const now = new Date();
-  const dateStr = now.toLocaleDateString();
-  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const dateStr = sanitizeForPrint(now.toLocaleDateString());
+  const timeStr = sanitizeForPrint(
+    now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  );
   const lines = [
     escTitleLine(ctx, storeName?.trim() || 'POS Mobile'),
     escHeaderLine(ctx, '*** TEST PRINT ***'),
     escDivider(ctx),
     escHeaderLine(ctx, 'Short receipt test'),
-    escPadLine(ctx, 'Date', dateStr),
-    escPadLine(ctx, 'Time', timeStr),
+    // Plain lines (not escPadLine) so Date/Time follow bodyAlign instead of
+    // always sitting left-anchored.
+    escLine(ctx, `Date: ${dateStr}`),
+    escLine(ctx, `Time: ${timeStr}`),
     escDivider(ctx),
     escHeaderLine(ctx, 'OK'),
     escHeaderLine(ctx, merged.footerMessage),
     escHeaderLine(ctx, RECEIPT_SOFTWARE_PROVIDER),
+    escHeaderLine(ctx, RECEIPT_SOFTWARE_WEBSITE),
     '',
     '',
   ];
@@ -36,15 +49,19 @@ export const buildLongTestReceipt = (
   const merged = mergeReceiptPrintSettings(null, customization);
   const ctx = createReceiptLayout(merged);
   const now = new Date();
-  const dateStr = now.toLocaleDateString();
-  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const dateStr = sanitizeForPrint(now.toLocaleDateString());
+  const timeStr = sanitizeForPrint(
+    now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  );
   const lines = [
     escTitleLine(ctx, storeName?.trim() || 'POS Mobile'),
     escHeaderLine(ctx, '*** TEST PRINT ***'),
     escHeaderLine(ctx, 'Long receipt test'),
     escDivider(ctx),
-    escPadLine(ctx, 'Date', dateStr),
-    escPadLine(ctx, 'Time', timeStr),
+    // Plain lines (not escPadLine) so Date/Time follow bodyAlign instead of
+    // always sitting left-anchored.
+    escLine(ctx, `Date: ${dateStr}`),
+    escLine(ctx, `Time: ${timeStr}`),
     escDivider(ctx),
     escPadLine(ctx, 'Item', 'Amount'),
     escDivider(ctx, '.'),
@@ -76,6 +93,7 @@ export const buildLongTestReceipt = (
   lines.push(escDivider(ctx));
   lines.push(escHeaderLine(ctx, merged.footerMessage));
   lines.push(escHeaderLine(ctx, RECEIPT_SOFTWARE_PROVIDER));
+  lines.push(escHeaderLine(ctx, RECEIPT_SOFTWARE_WEBSITE));
   lines.push('');
   lines.push('');
   return lines.join('');

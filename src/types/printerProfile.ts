@@ -31,12 +31,15 @@ export type PrinterProfileBehavior = {
   useDirectRawPrint: boolean;
   /** Strip bold/double-size tags that mini printers reject. */
   stripFancyTags: boolean;
-  /** Prefer printBill (auto-cut) when the native module exposes it. */
-  preferPrintBill: boolean;
   /** Extra wait after sending data — slow mini BT buffers need more time. */
   printDelayMultiplier: number;
-  /** Raster/logo via printRawData is unreliable on many mini units. */
+  /** Raster/logo via printRawData works on both profiles, but mini units need a smaller image
+   * (see logoMaxWidthPx) and a longer settle delay (see printDelayMultiplier) to stay reliable. */
   supportsRasterLogo: boolean;
+  /** Max raster image width in dots for the logo. Mini SCO3H-style units reliably choke on
+   * anything wider than ~200px (the native printImageData path already caps to this same
+   * value) — keep the two in sync if this ever changes. */
+  logoMaxWidthPx: number;
   defaultPaperWidth: '58mm' | '80mm';
 };
 
@@ -50,9 +53,9 @@ export const PRINTER_PROFILE_BEHAVIOR: Record<PrinterProfileId, PrinterProfileBe
     },
     useDirectRawPrint: true,
     stripFancyTags: true,
-    preferPrintBill: false,
     printDelayMultiplier: 2.5,
-    supportsRasterLogo: false,
+    supportsRasterLogo: true,
+    logoMaxWidthPx: 200,
     defaultPaperWidth: '58mm',
   },
   standard_counter: {
@@ -64,9 +67,9 @@ export const PRINTER_PROFILE_BEHAVIOR: Record<PrinterProfileId, PrinterProfileBe
     },
     useDirectRawPrint: false,
     stripFancyTags: false,
-    preferPrintBill: true,
     printDelayMultiplier: 1,
     supportsRasterLogo: true,
+    logoMaxWidthPx: 384,
     defaultPaperWidth: '80mm',
   },
 };

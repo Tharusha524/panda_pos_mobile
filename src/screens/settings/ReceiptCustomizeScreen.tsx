@@ -12,14 +12,13 @@ import { usePosSettings } from '@/context/PosSettingsContext';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { receiptLogoStorage } from '@/services/storage/receiptLogoStorage';
 import { receiptPrintStorage } from '@/services/storage/receiptPrintStorage';
-import { RECEIPT_SOFTWARE_PROVIDER } from '@/constants/receiptBranding';
+import { RECEIPT_SOFTWARE_PROVIDER, RECEIPT_SOFTWARE_WEBSITE } from '@/constants/receiptBranding';
 import { pickReceiptLogoFromGallery } from '@/utils/pickReceiptLogo';
 import { resolveReceiptLogo } from '@/utils/receiptLogoResolver';
 import {
   DEFAULT_RECEIPT_PRINT_CUSTOMIZATION,
   type ReceiptPaperWidth,
   type ReceiptPrintCustomization,
-  type ReceiptTextAlign,
   type ReceiptTitleFont,
 } from '@/types/receiptPrint';
 import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
@@ -245,11 +244,27 @@ export const ReceiptCustomizeScreen: React.FC = () => {
               ) : null}
               <Text style={styles.previewMono}>{previewTitle}</Text>
               <Text style={styles.previewMono}>----------------</Text>
-              <Text style={styles.previewMono}>SALES RECEIPT</Text>
-              <Text style={styles.previewMono}>Item ........ 100.00</Text>
+              <Text style={styles.previewMono}>2026-08-06      10:34 AM</Text>
+              <Text style={styles.previewMono}>Cashier          Admin</Text>
+              <Text style={styles.previewMono}>Sales receipt #  SAL-0001</Text>
+              <Text style={styles.previewMono}>----------------</Text>
+              <Text style={styles.previewMono}>Item Name  Qty Price Amt</Text>
+              <Text style={styles.previewMono}>----------------</Text>
+              <Text style={styles.previewMono}>Sample item  1  100.00 100.00</Text>
+              <Text style={styles.previewMono}>----------------</Text>
+              <Text style={styles.previewMono}>Subtotal         100.00</Text>
+              <Text style={styles.previewMono}>----------------</Text>
+              <Text style={styles.previewMono}>Total            100.00</Text>
+              <Text style={styles.previewMono}>================</Text>
+              <Text style={styles.previewMono}>Paid By Cash</Text>
+              <Text style={styles.previewMono}>Received         100.00</Text>
+              <Text style={styles.previewMono}>Balance            0.00</Text>
+              <Text style={styles.previewMono}>No of Item(s) 1</Text>
               <Text style={styles.previewMono}>----------------</Text>
               <Text style={styles.previewMono}>{previewFooter}</Text>
+              <Text style={styles.previewMono}>----------------</Text>
               <Text style={styles.previewMono}>{RECEIPT_SOFTWARE_PROVIDER}</Text>
+              <Text style={styles.previewMono}>{RECEIPT_SOFTWARE_WEBSITE}</Text>
             </Box>
             <Text fontSize="$xs" color="$textLight400" mt="$2">
               Printed output uses ESC/POS center/bold tags — fixes left-aligned headers on thermal
@@ -314,26 +329,6 @@ export const ReceiptCustomizeScreen: React.FC = () => {
               options={[
                 { id: '58mm', label: '58mm (32 chars)' },
                 { id: '80mm', label: '80mm (48 chars)' },
-              ]}
-            />
-            <ChipRow
-              label="Header alignment (store name, footer)"
-              value={form.headerAlign}
-              onChange={id => patch({ headerAlign: id as ReceiptTextAlign })}
-              options={[
-                { id: 'left', label: 'Left' },
-                { id: 'center', label: 'Center' },
-                { id: 'right', label: 'Right' },
-              ]}
-            />
-            <ChipRow
-              label="Body alignment (items, totals)"
-              value={form.bodyAlign}
-              onChange={id => patch({ bodyAlign: id as ReceiptTextAlign })}
-              options={[
-                { id: 'left', label: 'Left' },
-                { id: 'center', label: 'Center' },
-                { id: 'right', label: 'Right' },
               ]}
             />
             <ChipRow

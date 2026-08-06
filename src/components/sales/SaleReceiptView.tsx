@@ -6,6 +6,7 @@ import {
   DEFAULT_RECEIPT_STORE_NAME,
   getSaleReceiptTitle,
   RECEIPT_SOFTWARE_PROVIDER,
+  RECEIPT_SOFTWARE_WEBSITE,
 } from '@/constants/receiptBranding';
 import { formatCurrency, getCurrencyLabel, resolveCurrencyCode } from '@/utils/format';
 import { formatReceiptQtyDetail, resolveLineUom } from '@/utils/uom';
@@ -204,6 +205,7 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
       <View style={styles.divider} />
       <Text style={styles.thankYou}>Thank you for your business!</Text>
       <Text style={styles.softwareLine}>{RECEIPT_SOFTWARE_PROVIDER}</Text>
+      <Text style={styles.softwareLine}>{RECEIPT_SOFTWARE_WEBSITE}</Text>
       <Text style={styles.footerNote}>Printed: {printedAt}</Text>
       {sale.show_barcode && sale.barcode_value ? (
         <Text style={styles.barcode}>{sale.barcode_value}</Text>

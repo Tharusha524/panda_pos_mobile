@@ -13,8 +13,10 @@ import type { SystemReportPayload } from '@/types/reports';
 import type { BackendReportData } from '@/types/backendReports';
 import type { SystemReportHeader } from '@/types/reports';
 import { receiptPrintStorage } from '@/services/storage/receiptPrintStorage';
+import { tokenStorage } from '@/services/storage/tokenStorage';
 import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
-import { buildEscPosRasterBase64FromJpeg } from '@/utils/escPosRasterImage';
+import { buildEscPosRasterBase64FromImage } from '@/utils/escPosRasterImage';
+import { base64ToBytes, bytesToBase64 } from '@/utils/escPosBase64';
 import {
   resolveReceiptLogo,
   type ResolvedReceiptLogo,
@@ -29,6 +31,7 @@ import {
 import {
   getPrinterProfileBehavior,
   guessPrinterProfile,
+  type PrinterProfileBehavior,
   type PrinterProfileId,
 } from '@/types/printerProfile';
 import {
@@ -200,6 +203,12 @@ const estimatePrintDelayMs = (text: string, multiplier = 1): number =>
     Math.max(1000, Math.ceil(text.length / 32) * 120) * multiplier,
   );
 
+// ~0.2ms per raw byte matches the delay that was already known-safe for a full-size
+// (384px-wide) counter-printer logo — small logos settle faster instead of always
+// paying the worst-case wait, and the profile multiplier still covers slower mini units.
+const estimateLogoPrintDelayMs = (rawByteLength: number, multiplier = 1): number =>
+  Math.min(6000, Math.max(500, Math.round(rawByteLength * 0.2))) * multiplier;
+
 const delay = (ms: number): Promise<void> =>
   new Promise(resolve => {
     setTimeout(resolve, ms);
@@ -271,13 +280,76 @@ const printRawDataNative = async (
   });
 };
 
-/** Profile-aware ESC/POS send — SCO3H mini uses direct raw bytes + CP437, no fancy font tags. */
+// Cheap thermal printers (mini AND standard counter alike — both ultimately go through
+// this same native printRawData call) have small receive buffers and no real flow
+// control. Sending a long receipt as one big write can outrun the printer, which
+// silently drops bytes mid-transmission (seen as missing digits in printed amounts).
+// Splitting into small chunks with a short pause between each gives the printer time
+// to keep up.
+const RAW_CHUNK_SIZE_BYTES = 200;
+const RAW_CHUNK_DELAY_MS = 30;
+
+const printRawDataChunked = async (
+  type: PrinterConnectionType,
+  base64Data: string,
+  finalWaitMs: number,
+  delayMultiplier = 1,
+): Promise<void> => {
+  const bytes = base64ToBytes(base64Data);
+  if (bytes.length <= RAW_CHUNK_SIZE_BYTES) {
+    await printRawDataNative(type, base64Data, finalWaitMs);
+    return;
+  }
+
+  const native = type === 'network' ? NativeModules.RNNetPrinter : NativeModules.RNBLEPrinter;
+  if (!native?.printRawData) {
+    throw new Error('Printer raw output is not available');
+  }
+
+  // Cut only right after a line-feed (0x0A) byte, never at an arbitrary offset —
+  // each line's ESC/POS commands (e.g. the 3-byte center-align command) are fully
+  // self-contained before its line feed, so this guarantees a chunk boundary can
+  // never land in the middle of a command and corrupt/misalign the printout.
+  const chunks: Uint8Array[] = [];
+  let chunkStart = 0;
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i] === 0x0a && i - chunkStart + 1 >= RAW_CHUNK_SIZE_BYTES) {
+      chunks.push(bytes.subarray(chunkStart, i + 1));
+      chunkStart = i + 1;
+    }
+  }
+  if (chunkStart < bytes.length) {
+    chunks.push(bytes.subarray(chunkStart, bytes.length));
+  }
+
+  const chunkDelay = Math.round(RAW_CHUNK_DELAY_MS * delayMultiplier);
+  for (let i = 0; i < chunks.length; i++) {
+    const chunkBase64 = bytesToBase64(chunks[i]);
+    const isLast = i === chunks.length - 1;
+    if (isLast) {
+      // Wait for the real settle delay after the final chunk, same as an unchunked send.
+      await printRawDataNative(type, chunkBase64, finalWaitMs);
+    } else {
+      // The native write itself returns almost instantly (it hands off to a background
+      // thread) — what we're actually pacing is the printer's buffer, not this call, so
+      // there's no need to wait on its unreliable success callback between chunks.
+      native.printRawData(chunkBase64, () => {});
+      await delay(chunkDelay);
+    }
+  }
+};
+
+/**
+ * Profile-aware ESC/POS send. Always goes through our own chunked raw-byte write —
+ * the library's printText/printBill wrapper ultimately calls the exact same unchunked
+ * native printRawData, so it's just as prone to dropping bytes on long receipts; going
+ * straight there ourselves lets us chunk it (see printRawDataChunked).
+ */
 const sendRawText = async (
   type: PrinterConnectionType,
   text: string,
   profile?: PrinterProfileId,
 ): Promise<void> => {
-  const mod = getModuleForType(type);
   const behavior = getPrinterProfileBehavior(await resolvePrinterProfile(profile));
   const options: EscPosPrintOptions = { ...behavior.printOptions };
   const prepared = behavior.stripFancyTags
@@ -286,40 +358,11 @@ const sendRawText = async (
   const waitMs = estimatePrintDelayMs(prepared, behavior.printDelayMultiplier);
 
   const sendOnce = async (): Promise<void> => {
+    let base64 = buildEscPosBase64Payload(prepared, options);
     if (behavior.useDirectRawPrint) {
-      let base64 = buildEscPosBase64Payload(prepared, options);
       base64 = appendMiniPrinterFeed(base64);
-      await printRawDataNative(type, base64, waitMs);
-      return;
     }
-
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-    const finish = (err?: string) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (err) {
-        reject(new Error(err));
-      } else {
-        resolve();
-      }
-    };
-
-    try {
-      if (behavior.preferPrintBill && mod.printBill) {
-        mod.printBill(prepared, options);
-      } else {
-        mod.printText(prepared, options);
-      }
-    } catch (e) {
-      finish(e instanceof Error ? e.message : 'Print failed');
-      return;
-    }
-
-    setTimeout(() => finish(), waitMs);
-  });
+    await printRawDataChunked(type, base64, waitMs, behavior.printDelayMultiplier);
   };
 
   try {
@@ -350,31 +393,24 @@ const connectAndPrepare = async (
   }
 };
 
+// Delegates to printRawDataNative rather than calling native.printRawData directly —
+// that native method never invokes its callback on success (confirmed in the printer
+// library's Java source), so without the fallback timeout inside printRawDataNative this
+// would hang forever after a logo prints, silently blocking the receipt text that follows.
 const printRawEscPosBase64 = async (
   type: PrinterConnectionType,
   base64Data: string,
   delayMs = 1800,
 ): Promise<void> => {
-  const native =
-    type === 'network' ? NativeModules.RNNetPrinter : NativeModules.RNBLEPrinter;
-  if (!native?.printRawData) {
-    throw new Error('Printer does not support raw image output');
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    native.printRawData(base64Data, (error: string) => {
-      if (error) {
-        reject(new Error(error));
-      } else {
-        setTimeout(resolve, delayMs);
-      }
-    });
-  });
+  await printRawDataNative(type, base64Data, delayMs);
 };
+
+const LOGO_BASE_DELAY_MS = 1800;
 
 const printRemoteLogoImage = async (
   type: PrinterConnectionType,
   logoUrl: string,
+  behavior: PrinterProfileBehavior,
 ): Promise<void> => {
   const native =
     type === 'network' ? NativeModules.RNNetPrinter : NativeModules.RNBLEPrinter;
@@ -382,24 +418,52 @@ const printRemoteLogoImage = async (
     return;
   }
 
+  const waitMs = Math.round(LOGO_BASE_DELAY_MS * behavior.printDelayMultiplier);
   await new Promise<void>((resolve, reject) => {
-    native.printImageData(logoUrl, (error: string) => {
-      if (error) {
-        reject(new Error(error));
-      } else {
-        setTimeout(resolve, 1800);
+    let settled = false;
+    const finish = (err?: string) => {
+      if (settled) {
+        return;
       }
-    });
+      settled = true;
+      if (err) {
+        reject(new Error(err));
+      } else {
+        resolve();
+      }
+    };
+
+    try {
+      native.printImageData(logoUrl, (error: string) => {
+        if (error) {
+          finish(error);
+        } else {
+          setTimeout(() => finish(), waitMs);
+        }
+      });
+    } catch (e) {
+      finish(e instanceof Error ? e.message : 'Print failed');
+      return;
+    }
+
+    // Same missing-success-callback issue as printRawData — don't hang forever.
+    setTimeout(() => finish(), waitMs * 2);
   });
 };
 
 const printLocalLogoFile = async (
   type: PrinterConnectionType,
   filePath: string,
+  behavior: PrinterProfileBehavior,
 ): Promise<void> => {
-  const jpegBase64 = await RNBlobUtil.fs.readFile(filePath, 'base64');
-  const rasterBase64 = buildEscPosRasterBase64FromJpeg(jpegBase64);
-  await printRawEscPosBase64(type, rasterBase64, 2200);
+  const imageBase64 = await RNBlobUtil.fs.readFile(filePath, 'base64');
+  const rasterBase64 = buildEscPosRasterBase64FromImage(imageBase64, behavior.logoMaxWidthPx);
+  const rawByteLength = Math.floor((rasterBase64.length * 3) / 4);
+  await printRawEscPosBase64(
+    type,
+    rasterBase64,
+    estimateLogoPrintDelayMs(rawByteLength, behavior.printDelayMultiplier),
+  );
 };
 
 const printResolvedLogo = async (
@@ -412,10 +476,10 @@ const printResolvedLogo = async (
     return;
   }
   if (logo.kind === 'local') {
-    await printLocalLogoFile(type, logo.filePath);
+    await printLocalLogoFile(type, logo.filePath, behavior);
     return;
   }
-  await printRemoteLogoImage(type, logo.url);
+  await printRemoteLogoImage(type, logo.url, behavior);
 };
 
 const resolveSavedPrinter = async (): Promise<SavedPrinter> => {
@@ -621,6 +685,7 @@ export const bluetoothPrintService = {
     const localCustomization = await receiptPrintStorage.get();
     const customization = mergeReceiptPrintSettings(settings, localCustomization);
     const logo = await resolveReceiptLogo(receipt, settings);
+    const cashier = await tokenStorage.getUser();
 
     await connectAndPrepare(saved.type, saved.address, saved.profile);
 
@@ -636,6 +701,7 @@ export const bluetoothPrintService = {
       currency,
       customization,
       settings,
+      cashierName: cashier?.name,
     });
     await sendRawText(saved.type, text, saved.profile);
   },

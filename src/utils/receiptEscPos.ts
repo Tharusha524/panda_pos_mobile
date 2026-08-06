@@ -1,15 +1,15 @@
 import {
   DEFAULT_RECEIPT_STORE_NAME,
-  getSaleReceiptTitle,
   PURCHASE_RECEIPT_TITLE,
   RECEIPT_SOFTWARE_PROVIDER,
+  RECEIPT_SOFTWARE_WEBSITE,
 } from '@/constants/receiptBranding';
 import type { SaleReceiptPayload } from '@/types/sales';
 import type { PurchaseReceiptPayload } from '@/types/inventory';
 import type { PosMobileSettings } from '@/types/settings';
 import type { ReceiptPrintCustomization } from '@/types/receiptPrint';
-import { resolveCurrencyCode, formatPrintAmount } from '@/utils/format';
-import { formatReceiptQtyDetail, resolveLineUom } from '@/utils/uom';
+import { resolveCurrencyCode, formatPrintAmount, formatPlainAmount } from '@/utils/format';
+import { formatQtyWithUom, formatReceiptQtyDetail, resolveLineUom } from '@/utils/uom';
 import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
 import {
   createReceiptLayout,
@@ -17,7 +17,9 @@ import {
   escHeaderLine,
   escLine,
   escPadLine,
+  escTableRow,
   escTitleLine,
+  sanitizeForPrint,
   type ReceiptLayoutContext,
 } from '@/utils/receiptEscPosLayout';
 
@@ -27,7 +29,15 @@ export type BuildEscPosOptions = {
   currency?: string | null;
   customization?: ReceiptPrintCustomization | null;
   settings?: PosMobileSettings | null;
+  /** Logged-in user's name — printed on the "Cashier" line. */
+  cashierName?: string | null;
 };
+
+// Item-table columns (Item Name / Qty / Price / Amount) only fit as one line on wider
+// paper (80mm-ish, 48 chars). Narrower 58mm mini paper falls back to the older
+// two-line-per-item layout instead of cramming 4 columns into 32 chars.
+const WIDE_TABLE_MIN_WIDTH = 44;
+const ITEM_TABLE_COLUMNS = { name: 18, qty: 9, price: 8, amount: 10 } as const;
 
 const wrapDesc = (ctx: ReceiptLayoutContext, text: string): string => {
   const w = ctx.lineWidth;
@@ -43,116 +53,141 @@ export const buildEscPosReceipt = (
     options?.customization,
   );
   const ctx = createReceiptLayout(customization);
-  const code = resolveCurrencyCode(options?.currency);
   const sale = receipt.sale;
   const header = receipt.header as Record<string, string | undefined>;
   const lines: string[] = [];
 
+  const isReturn = Boolean((sale as { is_return?: boolean }).is_return);
+  const isHold =
+    (sale as { is_hold?: boolean }).is_hold ||
+    (sale as { order_status?: string }).order_status === 'hold';
+
+  // Header — company name, address, phone only.
   const company = header.company_name ?? DEFAULT_RECEIPT_STORE_NAME;
   lines.push(escTitleLine(ctx, company));
-
   if (header.address_line ?? header.address) {
     lines.push(escHeaderLine(ctx, String(header.address_line ?? header.address)));
   }
   if (customization.showPhone && header.phone) {
     lines.push(escHeaderLine(ctx, `Tel: ${header.phone}`));
   }
-  if (customization.showEmail && header.email) {
-    lines.push(escHeaderLine(ctx, header.email));
-  }
-  if (customization.showTaxId && header.tax_id) {
-    lines.push(escHeaderLine(ctx, `Tax ID: ${header.tax_id}`));
-  }
-  if (customization.showRegistration && header.registration_number) {
-    lines.push(escHeaderLine(ctx, `Reg: ${header.registration_number}`));
-  }
 
-  lines.push(escLine(ctx, ''));
-  const isReturn = Boolean((sale as { is_return?: boolean }).is_return);
-  const isHold =
-    (sale as { is_hold?: boolean }).is_hold ||
-    (sale as { order_status?: string }).order_status === 'hold';
   if (isHold) {
+    lines.push(escLine(ctx, ''));
     lines.push(escHeaderLine(ctx, 'HOLD ORDER'));
     lines.push(escHeaderLine(ctx, 'NOT PAID — Complete to finalize'));
-  } else {
+  } else if (isReturn) {
+    lines.push(escLine(ctx, ''));
+    lines.push(escHeaderLine(ctx, 'SALES RETURN'));
+  }
+  lines.push(escDivider(ctx));
+
+  // Date / Time / Cashier / Sales receipt # — ledger rows (unaffected by center
+  // alignment), matching the rest of the totals-style content below.
+  const timeStr = sanitizeForPrint(
+    new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  );
+  lines.push(escPadLine(ctx, sale.sale_date, timeStr));
+  if (options?.cashierName?.trim()) {
+    lines.push(escPadLine(ctx, 'Cashier', options.cashierName.trim().slice(0, 18)));
+  }
+  lines.push(
+    escPadLine(
+      ctx,
+      isReturn ? 'Return receipt #' : isHold ? 'Hold receipt #' : 'Sales receipt #',
+      sale.sales_id,
+    ),
+  );
+  lines.push(escDivider(ctx));
+
+  // Item table — full single-line columns on wide paper, two-line fallback on
+  // narrow 58mm mini paper where 4 columns can't fit legibly.
+  const isWideTable = ctx.lineWidth >= WIDE_TABLE_MIN_WIDTH;
+  if (isWideTable) {
+    const c = ITEM_TABLE_COLUMNS;
     lines.push(
-      escHeaderLine(
-        ctx,
-        getSaleReceiptTitle({ isReturn, isHold: false }),
-      ),
+      escTableRow(ctx, [
+        { text: 'Item Name', width: c.name },
+        { text: 'Qty', width: c.qty, align: 'right' },
+        { text: 'Price', width: c.price, align: 'right' },
+        { text: 'Amount', width: c.amount, align: 'right' },
+      ]),
     );
-  }
-  lines.push(escHeaderLine(ctx, `${isReturn ? 'Return' : isHold ? 'Hold' : 'Bill'}: ${sale.sales_id}`));
-  lines.push(escDivider(ctx));
-  lines.push(escPadLine(ctx, 'Date', sale.sale_date));
-
-  if (sale.customer_name) {
-    lines.push(escPadLine(ctx, 'Customer', sale.customer_name.slice(0, 18)));
-  }
-  if (sale.customer_contact_no) {
-    lines.push(escPadLine(ctx, 'Phone', sale.customer_contact_no.slice(0, 18)));
-  }
-  if (sale.customer_email) {
-    lines.push(escPadLine(ctx, 'Email', sale.customer_email.slice(0, 18)));
-  }
-  if (sale.customer_location) {
-    lines.push(escPadLine(ctx, 'Location', sale.customer_location.slice(0, 18)));
-  }
-  lines.push(escPadLine(ctx, 'Payment', sale.payment_method ?? 'Cash'));
-  lines.push(escDivider(ctx));
-  lines.push(escPadLine(ctx, 'Item', 'Amount'));
-  lines.push(escLine(ctx, '.'.repeat(ctx.lineWidth), 'left'));
-
-  for (const line of sale.lines) {
-    const desc = wrapDesc(ctx, line.description);
-    const uom = resolveLineUom(line.uom);
-    if (line.item_number) {
-      lines.push(escLine(ctx, `ID ${line.item_number}`));
+    lines.push(escDivider(ctx));
+    for (const line of sale.lines) {
+      lines.push(
+        escTableRow(ctx, [
+          { text: line.description, width: c.name },
+          { text: formatQtyWithUom(line.qty, line.uom), width: c.qty, align: 'right' },
+          { text: formatPlainAmount(line.unit_price), width: c.price, align: 'right' },
+          { text: formatPlainAmount(line.line_total), width: c.amount, align: 'right' },
+        ]),
+      );
     }
-    lines.push(escLine(ctx, desc));
-    const detail = formatReceiptQtyDetail(
-      line.qty,
-      formatPrintAmount(line.unit_price, code),
-      uom,
-    );
-    lines.push(escPadLine(ctx, detail, formatPrintAmount(line.line_total, code)));
+  } else {
+    lines.push(escPadLine(ctx, 'Item', 'Amount'));
+    lines.push(escLine(ctx, '.'.repeat(ctx.lineWidth), 'left'));
+    for (const line of sale.lines) {
+      const desc = wrapDesc(ctx, line.description);
+      const uom = resolveLineUom(line.uom);
+      if (line.item_number) {
+        lines.push(escLine(ctx, `ID ${line.item_number}`));
+      }
+      lines.push(escLine(ctx, desc));
+      const detail = formatReceiptQtyDetail(line.qty, formatPlainAmount(line.unit_price), uom);
+      lines.push(escPadLine(ctx, detail, formatPlainAmount(line.line_total)));
+    }
   }
 
   lines.push(escDivider(ctx));
-  lines.push(escPadLine(ctx, 'Subtotal', formatPrintAmount(sale.sub_total, code)));
+  lines.push(escPadLine(ctx, 'Subtotal', formatPlainAmount(sale.sub_total)));
   if (sale.discount > 0) {
     const baseLabel =
       (sale as { discount_label?: string | null }).discount_label?.trim() || 'Discount';
     const pct = (sale as { discount_percent?: number | null }).discount_percent;
     const discountLabel =
       pct != null && pct > 0 ? `${baseLabel} (${pct}%)` : baseLabel;
-    lines.push(
-      escPadLine(ctx, discountLabel, `-${formatPrintAmount(sale.discount, code)}`),
-    );
-    lines.push(
-      escPadLine(ctx, isHold ? 'Amount due' : 'Balance', formatPrintAmount(sale.net_amount, code)),
-    );
-  } else {
-    lines.push(escPadLine(ctx, isHold ? 'Amount due' : 'TOTAL', formatPrintAmount(sale.net_amount, code)));
+    lines.push(escPadLine(ctx, discountLabel, `-${formatPlainAmount(sale.discount)}`));
   }
+  lines.push(escDivider(ctx));
+  lines.push(escPadLine(ctx, isHold ? 'Amount due' : 'Total', formatPlainAmount(sale.net_amount)));
+  lines.push(escDivider(ctx, '='));
+
+  // 'left' explicitly — these sit among left-anchored ledger rows (Received/Balance,
+  // Name/Phone No/Address), so they must not fall back to the general center-align rule.
+  lines.push(escLine(ctx, `Paid By ${sale.payment_method ?? 'Cash'}`, 'left'));
   if (!isHold && sale.amount_received != null) {
-    lines.push(
-      escPadLine(ctx, 'Received', formatPrintAmount(sale.amount_received, code)),
-    );
+    lines.push(escPadLine(ctx, 'Received', formatPlainAmount(sale.amount_received)));
     const change = sale.amount_received - sale.net_amount;
     if (change >= 0) {
-      lines.push(escPadLine(ctx, 'Change', formatPrintAmount(change, code)));
+      lines.push(escPadLine(ctx, 'Balance', formatPlainAmount(change)));
     }
   }
+  lines.push(escLine(ctx, `No of Item(s) ${sale.lines.length}`, 'left'));
   if (isHold) {
     lines.push(escLine(ctx, ''));
     lines.push(escHeaderLine(ctx, 'THIS BILL IS ON HOLD'));
     lines.push(escHeaderLine(ctx, 'Payment not taken yet'));
   }
+
+  // Customer Details — only when a real (non-walk-in) customer is attached.
+  if (sale.customer_name) {
+    lines.push(escDivider(ctx));
+    lines.push(escLine(ctx, 'Customer Details', 'left'));
+    lines.push(escPadLine(ctx, 'Name', sale.customer_name.slice(0, 18)));
+    if (sale.customer_contact_no) {
+      lines.push(escPadLine(ctx, 'Phone No', sale.customer_contact_no.slice(0, 18)));
+    }
+    if (sale.customer_address) {
+      lines.push(escPadLine(ctx, 'Address', sale.customer_address.slice(0, 18)));
+    }
+  }
+
   lines.push(escDivider(ctx));
   lines.push(escHeaderLine(ctx, customization.footerMessage));
+  lines.push(escDivider(ctx));
   lines.push(escHeaderLine(ctx, RECEIPT_SOFTWARE_PROVIDER));
+  lines.push(escHeaderLine(ctx, RECEIPT_SOFTWARE_WEBSITE));
   lines.push(escLine(ctx, ''));
   lines.push(escLine(ctx, ''));
 
@@ -184,7 +219,9 @@ export const buildEscPosPurchaseReceipt = (
   lines.push(escHeaderLine(ctx, PURCHASE_RECEIPT_TITLE));
   lines.push(escHeaderLine(ctx, `Receipt: ${purchase.invoice_id}`));
   lines.push(escDivider(ctx));
-  lines.push(escPadLine(ctx, 'Date', purchase.purchase_date));
+  // Plain line (not escPadLine) so Date follows bodyAlign instead of always sitting
+  // left-anchored — everything else here stays a proper left/right ledger row.
+  lines.push(escLine(ctx, `Date: ${purchase.purchase_date}`));
 
   if (purchase.location) {
     lines.push(escPadLine(ctx, 'Location', purchase.location.slice(0, 18)));
@@ -236,6 +273,7 @@ export const buildEscPosPurchaseReceipt = (
   lines.push(escDivider(ctx));
   lines.push(escHeaderLine(ctx, customization.footerMessage));
   lines.push(escHeaderLine(ctx, RECEIPT_SOFTWARE_PROVIDER));
+  lines.push(escHeaderLine(ctx, RECEIPT_SOFTWARE_WEBSITE));
   lines.push(escLine(ctx, ''));
   lines.push(escLine(ctx, ''));
 

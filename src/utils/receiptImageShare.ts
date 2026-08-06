@@ -9,6 +9,7 @@ import { captureRef, type ViewShotRef } from 'react-native-view-shot';
 import {
   getSaleReceiptTitle,
   RECEIPT_SOFTWARE_PROVIDER,
+  RECEIPT_SOFTWARE_WEBSITE,
 } from '@/constants/receiptBranding';
 import { formatPrintAmount, resolveCurrencyCode } from '@/utils/format';
 import { formatReceiptQtyDetail, resolveLineUom } from '@/utils/uom';
@@ -287,6 +288,7 @@ export function buildReceiptShareText(
     '',
     'Thank you!',
     RECEIPT_SOFTWARE_PROVIDER,
+    RECEIPT_SOFTWARE_WEBSITE,
   ]
     .filter(Boolean)
     .join('\n');

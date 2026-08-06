@@ -11,6 +11,7 @@ import { LoadingOverlay } from '@/components/common/LoadingOverlay';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
 import { inventoryService } from '@/services/api/inventoryService';
+import { parseBackendTimestamp } from '@/utils/format';
 import type { ProductsStackParamList } from '@/navigation/types';
 import type { InventoryHistoryRow, ItemRecord } from '@/types/inventory';
 import { colors, TAB_BAR_SCROLL_PADDING, shadows } from '@/theme';
@@ -59,7 +60,7 @@ const HistoryRow: React.FC<{ row: InventoryHistoryRow }> = ({ row }) => (
     </HStack>
     {row.created_at ? (
       <Text size="xs" color={colors.textMuted} mt="$2">
-        {new Date(row.created_at.replace(' ', 'T')).toLocaleString()}
+        {parseBackendTimestamp(row.created_at).toLocaleString()}
         {row.location ? ` · ${row.location}` : ''}
       </Text>
     ) : null}

@@ -1,10 +1,10 @@
 import type { PosMobileSettings } from '@/types/settings';
 import type { ReceiptPrintCustomization } from '@/types/receiptPrint';
-import { RECEIPT_SOFTWARE_PROVIDER } from '@/constants/receiptBranding';
+import { RECEIPT_SOFTWARE_PROVIDER, RECEIPT_SOFTWARE_WEBSITE } from '@/constants/receiptBranding';
 import type { TodayTablesPayload } from '@/types/dashboard';
 import type { SystemReportHeader } from '@/types/reports';
 import { TRANSACTION_TYPE_RETURN } from '@/types/sales';
-import { resolveCurrencyCode, formatPrintAmount } from '@/utils/format';
+import { resolveCurrencyCode, formatPrintAmount, parseBackendTimestamp } from '@/utils/format';
 import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
 import {
   createReceiptLayout,
@@ -49,7 +49,7 @@ const appendHeader = (
   lines.push(escHeaderLine(ctx, title.toUpperCase()));
   lines.push(escHeaderLine(ctx, subtitle));
   if (generatedAt) {
-    const printed = new Date(generatedAt.replace(' ', 'T'));
+    const printed = parseBackendTimestamp(generatedAt);
     const stamp = Number.isNaN(printed.getTime())
       ? generatedAt
       : `${printed.toLocaleDateString()} ${printed.toLocaleTimeString([], {
@@ -197,6 +197,7 @@ export const buildDailyReceiptEscPos = (
   lines.push(escDivider(ctx));
   lines.push(escHeaderLine(ctx, customization.footerMessage));
   lines.push(escHeaderLine(ctx, RECEIPT_SOFTWARE_PROVIDER));
+  lines.push(escHeaderLine(ctx, RECEIPT_SOFTWARE_WEBSITE));
   lines.push(escLine(ctx, ''));
   lines.push(escLine(ctx, ''));
 
