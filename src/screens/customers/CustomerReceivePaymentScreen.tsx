@@ -13,7 +13,7 @@ import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Box, HStack, Text, VStack } from '@gluestack-ui/themed';
-import { User, Wallet } from 'lucide-react-native';
+import { Printer, User, Wallet } from 'lucide-react-native';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { AppHeader } from '@/components/common/AppHeader';
@@ -24,6 +24,8 @@ import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { useDataRefreshNotify } from '@/context/DataRefreshContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { customerService } from '@/services/api/customerService';
+import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
+import { buildPrintHeaderFromSettings } from '@/utils/receiptPrintCustomization';
 import { formatCurrency } from '@/utils/format';
 import {
   colors,
@@ -51,12 +53,13 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
-  const { currency } = usePosSettings();
-  const { showError, showErrorFromUnknown } = useErrorDialog();
+  const { currency, settings } = usePosSettings();
+  const { showError, showErrorFromUnknown, showConfirm } = useErrorDialog();
   const notifyRefresh = useDataRefreshNotify();
   const customerId = route.params.customerId;
 
   const [loading, setLoading] = useState(true);
+  const [printing, setPrinting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [customer, setCustomer] = useState<CustomerSummary | null>(null);
   const [amount, setAmount] = useState('');
@@ -127,17 +130,41 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
         notes: notes.trim() || null,
       });
       notifyRefresh(['customers', 'sales', 'dashboard', 'reports']);
-      showError({
+      const paidNotes = notes;
+      showConfirm({
         title: 'Payment recorded',
         message: `Received ${formatCurrency(result.payment_received, currency)} from ${customer.customer_name}. New balance: ${formatCurrency(result.new_balance, currency)}.`,
-        variant: 'info',
-        confirmLabel: 'Done',
+        confirmLabel: 'Print Receipt',
+        cancelLabel: 'Done',
+        onConfirm: () => {
+          const header = buildPrintHeaderFromSettings(settings);
+          bluetoothPrintService
+            .printPaymentReceipt(result, header, paidNotes, settings)
+            .catch(e => showErrorFromUnknown(e, 'Print receipt'));
+        },
       });
       navigation.goBack();
     } catch (e) {
       showErrorFromUnknown(e, 'Receive payment');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Standalone — prints the customer's current details/balance any time, independent
+  // of actually receiving a payment right now.
+  const handlePrintStatement = async () => {
+    if (!customer) {
+      return;
+    }
+    setPrinting(true);
+    try {
+      const header = buildPrintHeaderFromSettings(settings);
+      await bluetoothPrintService.printCustomerStatement(customer, header, settings);
+    } catch (e) {
+      showErrorFromUnknown(e, 'Print customer details');
+    } finally {
+      setPrinting(false);
     }
   };
 
@@ -192,6 +219,17 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
                     </Text>
                   </VStack>
                 </HStack>
+                <TouchableOpacity
+                  style={styles.printBtn}
+                  onPress={handlePrintStatement}
+                  disabled={printing}
+                  accessibilityRole="button"
+                  accessibilityLabel="Print customer details">
+                  <Printer size={14} color={colors.textSecondary} />
+                  <Text size="sm" fontWeight="$semibold" color={colors.textSecondary}>
+                    {printing ? 'Printing…' : 'Print customer details'}
+                  </Text>
+                </TouchableOpacity>
                 {outstanding <= 0 ? (
                   <Box mt="$3" p="$3" borderRadius="$lg" bg={colors.backgroundAlt}>
                     <Text size="sm" color={colors.textSecondary}>
@@ -279,6 +317,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.borderLight,
     marginBottom: 12,
+  },
+  printBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    backgroundColor: colors.backgroundAlt,
   },
   card: {
     backgroundColor: colors.white,

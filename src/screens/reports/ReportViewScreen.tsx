@@ -19,29 +19,16 @@ import { useSystemReport } from '@/hooks/useSystemReport';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { navigateToPrinterSetup } from '@/navigation/navigationRef';
 import { getReportMeta } from '@/types/reports';
-import type { SystemReportHeader } from '@/types/reports';
 import type { ReportsStackParamList } from '@/navigation/types';
-import type { PosMobileSettings } from '@/types/settings';
 import { colors } from '@/theme';
 import { defaultReportFilters, formatReportDateRangeLabel } from '@/utils/reportDateFilters';
 import type { ReportFilterParams } from '@/types/reportFilters';
+import { buildPrintHeaderFromSettings as buildHeader } from '@/utils/receiptPrintCustomization';
 
 type Route = RouteProp<ReportsStackParamList, 'ReportView'>;
 
 const isPrinterSetupError = (msg: string): boolean =>
   /no printer|not configured|settings/i.test(msg);
-
-const buildHeader = (settings?: PosMobileSettings | null): SystemReportHeader => ({
-  company_name:
-    settings?.printHeader?.company_name ??
-    settings?.company?.name ??
-    'Business Report',
-  address:
-    settings?.printHeader?.address_line ?? settings?.company?.address ?? undefined,
-  phone: settings?.printHeader?.phone ?? settings?.company?.phone ?? undefined,
-  email: settings?.printHeader?.email ?? settings?.company?.email ?? undefined,
-  tax_id: settings?.printHeader?.tax_id ?? settings?.company?.tax_id ?? undefined,
-});
 
 export const ReportViewScreen: React.FC = () => {
   const { params } = useRoute<Route>();

@@ -1,10 +1,24 @@
 import type { PosMobileSettings } from '@/types/settings';
 import type { PrintableReceipt } from '@/utils/receiptEscPos';
+import type { SystemReportHeader } from '@/types/reports';
 import {
   DEFAULT_RECEIPT_PRINT_CUSTOMIZATION,
   type ReceiptPaperWidth,
   type ReceiptPrintCustomization,
 } from '@/types/receiptPrint';
+
+/** Shared company header info for anything printed that isn't a sale/purchase
+ * receipt (reports, customer statements) — those pull header fields from their own
+ * backend response instead. */
+export const buildPrintHeaderFromSettings = (
+  settings?: PosMobileSettings | null,
+): SystemReportHeader => ({
+  company_name: settings?.printHeader?.company_name ?? settings?.company?.name ?? undefined,
+  address: settings?.printHeader?.address_line ?? settings?.company?.address ?? undefined,
+  phone: settings?.printHeader?.phone ?? settings?.company?.phone ?? undefined,
+  email: settings?.printHeader?.email ?? settings?.company?.email ?? undefined,
+  tax_id: settings?.printHeader?.tax_id ?? settings?.company?.tax_id ?? undefined,
+});
 
 const paperWidthFromHardware = (hardware?: Record<string, unknown>): ReceiptPaperWidth => {
   const raw = hardware?.printing_paper_size;

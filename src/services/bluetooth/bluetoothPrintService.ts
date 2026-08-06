@@ -5,6 +5,12 @@ import { buildEscPosPrintText, type PrintableReceipt } from '@/utils/receiptEscP
 import { buildEscPosReport } from '@/utils/reportEscPos';
 import { buildEscPosBackendReport } from '@/utils/backendReportEscPos';
 import {
+  buildEscPosCustomerStatement,
+  buildEscPosPaymentReceipt,
+} from '@/utils/customerStatementEscPos';
+import type { CustomerSummary } from '@/types/sales';
+import type { ReceivePaymentResult } from '@/types/customers';
+import {
   buildDailyReceiptEscPos,
   type DailyReceiptKind,
 } from '@/utils/dailyReceiptEscPos';
@@ -777,6 +783,87 @@ export const bluetoothPrintService = {
       currency,
       customization,
       settings,
+    });
+    await sendRawText(saved.type, text, saved.profile);
+  },
+
+  /**
+   * Standalone customer details printout — name, contact, outstanding balance.
+   * Not tied to a payment transaction; available any time the cashier wants to hand
+   * a customer their current details.
+   */
+  async printCustomerStatement(
+    customer: CustomerSummary,
+    header: SystemReportHeader,
+    settings?: PosMobileSettings | null,
+  ): Promise<void> {
+    if (!(await this.isConfigured())) {
+      throw new Error(
+        'No printer configured. Set up your printer in Settings → Receipt printer.',
+      );
+    }
+
+    const saved = await resolveSavedPrinter();
+    const localCustomization = await receiptPrintStorage.get();
+    const customization = mergeReceiptPrintSettings(settings, localCustomization);
+    const logo = await resolveReceiptLogo(null, settings);
+    const cashier = await tokenStorage.getUser();
+
+    await connectAndPrepare(saved.type, saved.address, saved.profile);
+
+    if (customization.showLogo && logo) {
+      try {
+        await printResolvedLogo(saved.type, logo, saved.profile);
+      } catch {
+        /* continue with text if logo print fails */
+      }
+    }
+
+    const text = buildEscPosCustomerStatement(customer, header, {
+      customization,
+      settings,
+      cashierName: cashier?.name,
+    });
+    await sendRawText(saved.type, text, saved.profile);
+  },
+
+  /**
+   * Receipt for a payment actually just collected — previous/new balance, amount,
+   * payment method, notes. Optional: the cashier chooses to print after a payment
+   * succeeds, distinct from the always-available customer statement above.
+   */
+  async printPaymentReceipt(
+    result: ReceivePaymentResult,
+    header: SystemReportHeader,
+    notes: string | null | undefined,
+    settings?: PosMobileSettings | null,
+  ): Promise<void> {
+    if (!(await this.isConfigured())) {
+      throw new Error(
+        'No printer configured. Set up your printer in Settings → Receipt printer.',
+      );
+    }
+
+    const saved = await resolveSavedPrinter();
+    const localCustomization = await receiptPrintStorage.get();
+    const customization = mergeReceiptPrintSettings(settings, localCustomization);
+    const logo = await resolveReceiptLogo(null, settings);
+    const cashier = await tokenStorage.getUser();
+
+    await connectAndPrepare(saved.type, saved.address, saved.profile);
+
+    if (customization.showLogo && logo) {
+      try {
+        await printResolvedLogo(saved.type, logo, saved.profile);
+      } catch {
+        /* continue with text if logo print fails */
+      }
+    }
+
+    const text = buildEscPosPaymentReceipt(result, header, notes, {
+      customization,
+      settings,
+      cashierName: cashier?.name,
     });
     await sendRawText(saved.type, text, saved.profile);
   },
