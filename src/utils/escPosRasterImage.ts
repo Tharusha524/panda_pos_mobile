@@ -178,6 +178,32 @@ const decodeImageBytes = (
   return { data: jpeg.data, width: jpeg.width, height: jpeg.height };
 };
 
+/** One 24-row raster "band" — a complete, self-contained ESC/POS image command
+ * (mode select + width + pixel data + line feed). Never split across two bands. */
+const buildRasterBands = (pixels: number[][], width: number): number[][] => {
+  const bands: number[][] = [];
+  for (let y = 0; y < pixels.length; y += 24) {
+    const band: number[] = [...SELECT_BIT_IMAGE_MODE, width & 0xff, (width >> 8) & 0xff];
+    for (let x = 0; x < width; x++) {
+      band.push(...recollectSlice(y, x, pixels));
+    }
+    band.push(...LINE_FEED);
+    bands.push(band);
+  }
+  return bands;
+};
+
+const prepareRasterBands = (
+  imageBase64: string,
+  maxWidth: number,
+): number[][] => {
+  const bytes = base64ToBytes(imageBase64);
+  const decoded = decodeImageBytes(bytes);
+  const resized = resizeRgba(decoded.data, decoded.width, decoded.height, maxWidth);
+  const pixels = buildPixelGrid(resized.data, resized.width, resized.height);
+  return buildRasterBands(pixels, resized.width);
+};
+
 /**
  * Build ESC/POS raster bytes (base64) for thermal printRawData from an image file's
  * base64 content. Supports both PNG and JPEG source images (detected by file signature) —
@@ -187,28 +213,42 @@ export const buildEscPosRasterBase64FromImage = (
   imageBase64: string,
   maxWidth = 384,
 ): string => {
-  const bytes = base64ToBytes(imageBase64);
-  const decoded = decodeImageBytes(bytes);
-  const resized = resizeRgba(decoded.data, decoded.width, decoded.height, maxWidth);
-  const pixels = buildPixelGrid(resized.data, resized.width, resized.height);
+  const bands = prepareRasterBands(imageBase64, maxWidth);
+  const out: number[] = [...SET_LINE_SPACE_24, ...CENTER_ALIGN];
+  for (const band of bands) {
+    out.push(...band);
+  }
+  out.push(...SET_LINE_SPACE_32, ...LINE_FEED);
+  return bytesToBase64(out);
+};
 
-  const out: number[] = [
-    ...SET_LINE_SPACE_24,
-    ...CENTER_ALIGN,
-  ];
+/**
+ * Same raster image, but returned as one base64 chunk per 24-row band instead of a
+ * single blob — lets the caller stream it to the printer a band at a time with short
+ * pauses, instead of one big write followed by one long settle delay. Each chunk is a
+ * complete ESC/POS command, so splitting here can never corrupt a command mid-way
+ * (unlike naive fixed-size byte chunking, which risks cutting a command in half since
+ * raw pixel bytes can coincidentally match any byte value, including control bytes).
+ */
+export const buildEscPosRasterBandsBase64FromImage = (
+  imageBase64: string,
+  maxWidth = 384,
+): string[] => {
+  const bands = prepareRasterBands(imageBase64, maxWidth);
+  const header = [...SET_LINE_SPACE_24, ...CENTER_ALIGN];
+  const footer = [...SET_LINE_SPACE_32, ...LINE_FEED];
 
-  for (let y = 0; y < pixels.length; y += 24) {
-    out.push(...SELECT_BIT_IMAGE_MODE);
-    out.push(resized.width & 0xff);
-    out.push((resized.width >> 8) & 0xff);
-    for (let x = 0; x < resized.width; x++) {
-      out.push(...recollectSlice(y, x, pixels));
-    }
-    out.push(...LINE_FEED);
+  if (bands.length === 0) {
+    return [bytesToBase64([...header, ...footer])];
+  }
+  if (bands.length === 1) {
+    return [bytesToBase64([...header, ...bands[0], ...footer])];
   }
 
-  out.push(...SET_LINE_SPACE_32);
-  out.push(...LINE_FEED);
-
-  return bytesToBase64(out);
+  const lastIndex = bands.length - 1;
+  return bands.map((band, i) => {
+    const withHeader = i === 0 ? [...header, ...band] : band;
+    const withFooter = i === lastIndex ? [...withHeader, ...footer] : withHeader;
+    return bytesToBase64(withFooter);
+  });
 };

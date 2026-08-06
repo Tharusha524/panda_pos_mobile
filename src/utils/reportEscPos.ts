@@ -191,6 +191,32 @@ const buildSalesReport = (
       ),
     );
   }
+  lines.push(
+    escPadLine(
+      ctx,
+      'Net sales',
+      formatPrintAmount(summary.salesAmount - summary.returnAmount, code),
+    ),
+  );
+
+  // Payment method breakdown — how much came in via each method (excludes returns,
+  // which are already broken out above).
+  const paymentTotals = new Map<string, number>();
+  for (const row of rows) {
+    if (row.transaction_type === TRANSACTION_TYPE_RETURN) {
+      continue;
+    }
+    const method = row.payment_method?.trim() || 'Unspecified';
+    paymentTotals.set(method, (paymentTotals.get(method) ?? 0) + row.amount);
+  }
+  if (paymentTotals.size > 0) {
+    lines.push(escDivider(ctx));
+    lines.push(escHeaderLine(ctx, 'BY PAYMENT METHOD'));
+    for (const [method, amount] of paymentTotals) {
+      lines.push(escPadLine(ctx, method, formatPrintAmount(amount, code)));
+    }
+  }
+
   lines.push(escDivider(ctx));
   lines.push(escPadLine(ctx, 'Bill', 'Amount'));
   lines.push(escLine(ctx, '.'.repeat(ctx.lineWidth), 'left'));

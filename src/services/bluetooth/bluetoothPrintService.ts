@@ -15,7 +15,7 @@ import type { SystemReportHeader } from '@/types/reports';
 import { receiptPrintStorage } from '@/services/storage/receiptPrintStorage';
 import { tokenStorage } from '@/services/storage/tokenStorage';
 import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
-import { buildEscPosRasterBase64FromImage } from '@/utils/escPosRasterImage';
+import { buildEscPosRasterBandsBase64FromImage } from '@/utils/escPosRasterImage';
 import { base64ToBytes, bytesToBase64 } from '@/utils/escPosBase64';
 import {
   resolveReceiptLogo,
@@ -393,18 +393,6 @@ const connectAndPrepare = async (
   }
 };
 
-// Delegates to printRawDataNative rather than calling native.printRawData directly —
-// that native method never invokes its callback on success (confirmed in the printer
-// library's Java source), so without the fallback timeout inside printRawDataNative this
-// would hang forever after a logo prints, silently blocking the receipt text that follows.
-const printRawEscPosBase64 = async (
-  type: PrinterConnectionType,
-  base64Data: string,
-  delayMs = 1800,
-): Promise<void> => {
-  await printRawDataNative(type, base64Data, delayMs);
-};
-
 const LOGO_BASE_DELAY_MS = 1800;
 
 const printRemoteLogoImage = async (
@@ -457,12 +445,30 @@ const printLocalLogoFile = async (
   behavior: PrinterProfileBehavior,
 ): Promise<void> => {
   const imageBase64 = await RNBlobUtil.fs.readFile(filePath, 'base64');
-  const rasterBase64 = buildEscPosRasterBase64FromImage(imageBase64, behavior.logoMaxWidthPx);
-  const rawByteLength = Math.floor((rasterBase64.length * 3) / 4);
-  await printRawEscPosBase64(
+  const bands = buildEscPosRasterBandsBase64FromImage(imageBase64, behavior.logoMaxWidthPx);
+
+  const native = type === 'network' ? NativeModules.RNNetPrinter : NativeModules.RNBLEPrinter;
+  if (!native?.printRawData) {
+    throw new Error('Printer does not support raw image output');
+  }
+
+  // Stream the logo band-by-band (each band is a complete, self-contained raster
+  // command — see buildEscPosRasterBandsBase64FromImage) instead of one big write
+  // followed by one long settle wait. The printer processes each band while the next
+  // is being sent, so only the final band needs a real settle delay afterward — the
+  // total pause ends up much shorter than sending everything at once.
+  const interBandDelay = Math.round(RAW_CHUNK_DELAY_MS * behavior.printDelayMultiplier);
+  for (let i = 0; i < bands.length - 1; i++) {
+    native.printRawData(bands[i], () => {});
+    await delay(interBandDelay);
+  }
+
+  const lastBand = bands[bands.length - 1];
+  const lastByteLength = Math.floor((lastBand.length * 3) / 4);
+  await printRawDataNative(
     type,
-    rasterBase64,
-    estimateLogoPrintDelayMs(rawByteLength, behavior.printDelayMultiplier),
+    lastBand,
+    estimateLogoPrintDelayMs(lastByteLength, behavior.printDelayMultiplier),
   );
 };
 
