@@ -132,7 +132,12 @@ export const HoldOrdersScreen: React.FC = () => {
         promptPrinterSetup('Configure a receipt printer in Settings → Receipt printer.');
         return;
       }
-      await bluetoothPrintService.printReceipt(receipt, currency, settings);
+      await bluetoothPrintService.printReceipt(
+        receipt,
+        currency,
+        settings,
+        order.customer_id,
+      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Print failed';
       if (isPrinterSetupError(msg)) {

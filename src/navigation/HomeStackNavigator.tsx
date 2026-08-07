@@ -8,12 +8,15 @@ import { ExpensesScreen } from '@/screens/expenses/ExpensesScreen';
 import { ExpenseFormScreen } from '@/screens/expenses/ExpenseFormScreen';
 import { CustomerFormScreen } from '@/screens/customers/CustomerFormScreen';
 import { CustomerReceivePaymentScreen } from '@/screens/customers/CustomerReceivePaymentScreen';
+import { CustomerHistoryScreen } from '@/screens/customers/CustomerHistoryScreen';
+import { CustomerSaleReceiptScreen } from '@/screens/customers/CustomerSaleReceiptScreen';
 import type { HomeStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<HomeStackParamList>();
 
 export const HomeStackNavigator: React.FC = () => (
   <Stack.Navigator
+    id="HomeStack"
     screenOptions={{
       headerShown: false,
       animation: 'slide_from_right',
@@ -29,6 +32,8 @@ export const HomeStackNavigator: React.FC = () => (
       name="CustomerReceivePayment"
       component={CustomerReceivePaymentScreen}
     />
+    <Stack.Screen name="CustomerHistory" component={CustomerHistoryScreen} />
+    <Stack.Screen name="CustomerSaleReceipt" component={CustomerSaleReceiptScreen} />
     <Stack.Screen name="ExpensesList" component={ExpensesScreen} />
     <Stack.Screen name="ExpenseForm" component={ExpenseFormScreen} />
   </Stack.Navigator>

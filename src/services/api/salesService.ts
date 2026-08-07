@@ -80,6 +80,7 @@ export const salesService = {
   async listSales(params?: {
     transaction_type?: string;
     location?: string;
+    customer_id?: number;
   }): Promise<SalesListResult> {
     const { data } = await apiClient.get<
       ApiSuccessResponse<SaleRecord[]> & {

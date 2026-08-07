@@ -12,7 +12,7 @@ export interface CreatePurchasePayload {
   discount: number;
   amount: number;
   payment_method?: string;
-  bank_id?: number | null;
+  bank_id?: number | string | null;
   cheque_number?: string | null;
   notes?: string | null;
   items: {

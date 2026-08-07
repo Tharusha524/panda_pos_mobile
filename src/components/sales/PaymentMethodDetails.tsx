@@ -227,18 +227,16 @@ export const PaymentMethodDetails: React.FC<PaymentMethodDetailsProps> = ({
             ))
           )}
           {/cheque/i.test(paymentMethod) ? (
-            bankAsFreeText ? null : (
-              <>
-                <Text style={styles.label}>Cheque number</Text>
-                <TextInput
-                  value={chequeNumber}
-                  onChangeText={onChequeNumberChange}
-                  style={appInputStyle}
-                  placeholder="Enter cheque number"
-                  placeholderTextColor={colors.textMuted}
-                />
-              </>
-            )
+            <>
+              <Text style={styles.label}>Cheque number (optional)</Text>
+              <TextInput
+                value={chequeNumber}
+                onChangeText={onChequeNumberChange}
+                style={appInputStyle}
+                placeholder="Enter cheque number"
+                placeholderTextColor={colors.textMuted}
+              />
+            </>
           ) : (
             <>
               <Text style={styles.label}>Transfer reference</Text>

@@ -491,7 +491,14 @@ export const SaleOrderScreen: React.FC = () => {
     setPrinting(true);
     try {
       if (bluetoothPrintService.isSupported()) {
-        await bluetoothPrintService.printReceipt(receiptWithCustomerInfo, currency, settings);
+        const customerId =
+          activeCustomer && !isWalkInCustomer(activeCustomer) ? activeCustomer.id : null;
+        await bluetoothPrintService.printReceipt(
+          receiptWithCustomerInfo,
+          currency,
+          settings,
+          customerId,
+        );
       }
     } catch (e) {
       showError({

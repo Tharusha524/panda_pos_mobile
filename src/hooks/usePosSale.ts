@@ -167,10 +167,10 @@ export const usePosSale = () => {
     return settings?.allow_edit_selling_price !== false;
   }, [context?.order_settings]);
 
-  const allowOffer = useMemo(() => {
-    const settings = context?.order_settings as { allow_offer?: boolean } | undefined;
-    return settings?.allow_offer !== false;
-  }, [context?.order_settings]);
+  // Offers are disabled app-wide for this build — prices are set manually per item,
+  // so an auto-applied offer discount on top would double up on a price the cashier
+  // already decided. Overrides the backend's order_settings.allow_offer on purpose.
+  const allowOffer = false;
 
   const applicableOffers = useMemo(
     () => context?.applicable_offers ?? [],

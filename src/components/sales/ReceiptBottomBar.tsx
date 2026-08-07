@@ -4,7 +4,7 @@ import { PrimaryButton } from '@/components/buttons/PrimaryButton';
 
 interface ReceiptActionsProps {
   onPrint?: () => void;
-  onNewSale: () => void;
+  onNewSale?: () => void;
   printLoading?: boolean;
   showPrint?: boolean;
 }
@@ -16,11 +16,11 @@ export const ReceiptActions: React.FC<ReceiptActionsProps> = ({
   showPrint = true,
 }) => {
   if (!showPrint || !onPrint) {
-    return (
+    return onNewSale ? (
       <View style={styles.wrap}>
         <PrimaryButton label="New sale" onPress={onNewSale} />
       </View>
-    );
+    ) : null;
   }
 
   return (
@@ -34,9 +34,11 @@ export const ReceiptActions: React.FC<ReceiptActionsProps> = ({
             disabled={printLoading}
           />
         </View>
-        <View style={styles.col}>
-          <PrimaryButton label="New sale" variant="outline" onPress={onNewSale} />
-        </View>
+        {onNewSale ? (
+          <View style={styles.col}>
+            <PrimaryButton label="New sale" variant="outline" onPress={onNewSale} />
+          </View>
+        ) : null}
       </View>
     </View>
   );

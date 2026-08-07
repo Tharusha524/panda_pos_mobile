@@ -13,6 +13,8 @@ export type HomeStackParamList = {
   CustomersList: { filterByBalance?: boolean } | undefined;
   CustomerForm: { customerId?: number; selectOnSave?: boolean };
   CustomerReceivePayment: { customerId: number };
+  CustomerHistory: { customerId: number };
+  CustomerSaleReceipt: { receipt: SaleReceiptPayload };
   ExpensesList: undefined;
   ExpenseForm: { expenseId?: number };
 };

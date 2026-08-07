@@ -365,6 +365,14 @@ export const CustomerFormScreen: React.FC = () => {
                   loading={submitting}
                   disabled={deleting}
                 />
+                {isEdit && customerId ? (
+                  <PrimaryButton
+                    label="Customer history"
+                    onPress={() => navigation.navigate('CustomerHistory', { customerId })}
+                    disabled={submitting || deleting}
+                    variant="outline"
+                  />
+                ) : null}
                 {isEdit && !selectOnSave ? (
                   <PrimaryButton
                     label={deleting ? 'Deleting…' : 'Delete customer'}

@@ -66,7 +66,7 @@ export const PurchaseOrderScreen: React.FC = () => {
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [amountReceived, setAmountReceived] = useState('');
   const [banks, setBanks] = useState<BankAccount[]>([]);
-  const [bankId, setBankId] = useState<number | null>(null);
+  const [bankId, setBankId] = useState<number | string | null>('');
   const [chequeNumber, setChequeNumber] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [paymentCardLast4, setPaymentCardLast4] = useState('');
@@ -203,10 +203,10 @@ export const PurchaseOrderScreen: React.FC = () => {
       });
       return;
     }
-    if (needsBank(paymentMethod) && banks.length > 0 && !bankId) {
+    if (needsBank(paymentMethod) && !String(bankId ?? '').trim()) {
       showError({
         title: 'Bank',
-        message: 'Select a bank account.',
+        message: 'Enter a bank name.',
         variant: 'warning',
       });
       return;
@@ -529,7 +529,8 @@ export const PurchaseOrderScreen: React.FC = () => {
             onAmountReceivedChange={setAmountReceived}
             banks={banks}
             bankId={bankId}
-            onBankIdChange={id => setBankId(typeof id === 'number' ? id : null)}
+            onBankIdChange={setBankId}
+            bankAsFreeText
             chequeNumber={chequeNumber}
             onChequeNumberChange={setChequeNumber}
             paymentReference={paymentReference}

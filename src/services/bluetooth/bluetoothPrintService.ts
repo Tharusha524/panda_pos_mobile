@@ -10,6 +10,7 @@ import {
 } from '@/utils/customerStatementEscPos';
 import type { CustomerSummary } from '@/types/sales';
 import type { ReceivePaymentResult } from '@/types/customers';
+import { customerService } from '@/services/api/customerService';
 import {
   buildDailyReceiptEscPos,
   type DailyReceiptKind,
@@ -686,6 +687,11 @@ export const bluetoothPrintService = {
     receipt: PrintableReceipt,
     currency?: string,
     settings?: PosMobileSettings | null,
+    /** Real numeric customer id — not part of the receipt payload itself (which only
+     * carries display fields like customer_code/customer_name), so the caller passes
+     * it when known so the receipt can show the customer's overall outstanding
+     * balance, not just this transaction's change due. Omit if not on hand. */
+    customerId?: number | null,
   ): Promise<void> {
     if (!(await this.isConfigured())) {
       throw new Error(
@@ -698,6 +704,14 @@ export const bluetoothPrintService = {
     const customization = mergeReceiptPrintSettings(settings, localCustomization);
     const logo = await resolveReceiptLogo(receipt, settings);
     const cashier = await tokenStorage.getUser();
+
+    // Best-effort: a failed/slow lookup should never block printing the receipt.
+    const customerOutstandingBalance = customerId
+      ? await customerService
+          .get(customerId)
+          .then(c => c.net_balance ?? null)
+          .catch(() => null)
+      : null;
 
     await connectAndPrepare(saved.type, saved.address, saved.profile);
 
@@ -714,6 +728,7 @@ export const bluetoothPrintService = {
       customization,
       settings,
       cashierName: cashier?.name,
+      customerOutstandingBalance,
     });
     await sendRawText(saved.type, text, saved.profile);
   },

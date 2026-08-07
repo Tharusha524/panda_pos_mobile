@@ -31,6 +31,10 @@ export type BuildEscPosOptions = {
   settings?: PosMobileSettings | null;
   /** Logged-in user's name — printed on the "Cashier" line. */
   cashierName?: string | null;
+  /** Customer's total amount owed across all sales (not just this one) — separate
+   * from "Balance", which is just this transaction's change due. Only printed when
+   * the sale has a customer and this is provided. */
+  customerOutstandingBalance?: number | null;
 };
 
 // Item-table columns (Item Name / Qty / Price / Amount) only fit as one line on wider
@@ -162,6 +166,18 @@ export const buildEscPosReceipt = (
     if (change >= 0) {
       lines.push(escPadLine(ctx, 'Balance', formatPlainAmount(change)));
     }
+  }
+  // Customer's total amount owed overall — distinct from "Balance" above, which is
+  // just this transaction's change due. Only shown when the caller resolved and
+  // supplied a real customer's current balance (see printReceipt's customerId param).
+  if (options?.customerOutstandingBalance != null) {
+    lines.push(
+      escPadLine(
+        ctx,
+        'Outstanding balance',
+        formatPlainAmount(options.customerOutstandingBalance),
+      ),
+    );
   }
   lines.push(escLine(ctx, `No of Item(s) ${sale.lines.length}`, 'left'));
   if (isHold) {
