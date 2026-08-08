@@ -3,6 +3,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   TextInput,
+  TouchableOpacity,
   TouchableWithoutFeedback,
   Keyboard,
   StyleSheet,
@@ -12,7 +13,8 @@ import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ScrollView } from 'react-native-gesture-handler';
-import { Box, Text, VStack } from '@gluestack-ui/themed';
+import { Box, HStack, Text, VStack } from '@gluestack-ui/themed';
+import { MapPin, Navigation } from 'lucide-react-native';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { AppHeader } from '@/components/common/AppHeader';
@@ -23,6 +25,7 @@ import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { useDataRefreshNotify } from '@/context/DataRefreshContext';
 import { useOptionalPosSaleContext } from '@/context/PosSaleContext';
 import { customerService } from '@/services/api/customerService';
+import { customerLocationService } from '@/services/location/customerLocationService';
 import { suggestNextCustomerCode } from '@/utils/customerCode';
 import { colors, typography, appInputStyle, appInputPlaceholderColor } from '@/theme';
 import type { HomeStackParamList, SalesStackParamList } from '@/navigation/types';
@@ -67,6 +70,9 @@ export const CustomerFormScreen: React.FC = () => {
   const [address, setAddress] = useState('');
   const [taxId, setTaxId] = useState('');
   const [locations, setLocations] = useState<string[]>(['Main Location']);
+  const [gpsLatitude, setGpsLatitude] = useState<number | null>(null);
+  const [gpsLongitude, setGpsLongitude] = useState<number | null>(null);
+  const [capturingLocation, setCapturingLocation] = useState(false);
 
   const scrollToFocusedField = useCallback(() => {
     if (!scrollRef.current) return;
@@ -102,6 +108,8 @@ export const CustomerFormScreen: React.FC = () => {
           setCustomerRoute(customer.route ?? '');
           setAddress(customer.address ?? customer.address_line1 ?? '');
           setTaxId(customer.tax_id ?? customer.nic ?? '');
+          setGpsLatitude(customer.latitude ?? null);
+          setGpsLongitude(customer.longitude ?? null);
         } else {
           setCustomerCode(suggestNextCustomerCode(list.customers));
 
@@ -138,6 +146,8 @@ export const CustomerFormScreen: React.FC = () => {
       route: customerRoute.trim(),
       address_line1: address.trim() || null,
       nic: taxId.trim() || null,
+      latitude: gpsLatitude,
+      longitude: gpsLongitude,
       ...(isEdit
         ? { customer_code: customerCode.trim() || undefined }
         : customerCode.trim()
@@ -189,6 +199,19 @@ export const CustomerFormScreen: React.FC = () => {
         }
       },
     });
+  };
+
+  const handleCaptureLocation = async () => {
+    setCapturingLocation(true);
+    try {
+      const coords = await customerLocationService.getCurrentPosition();
+      setGpsLatitude(coords.latitude);
+      setGpsLongitude(coords.longitude);
+    } catch (e) {
+      showErrorFromUnknown(e, 'Save location');
+    } finally {
+      setCapturingLocation(false);
+    }
   };
 
   const handleSave = async () => {
@@ -339,6 +362,35 @@ export const CustomerFormScreen: React.FC = () => {
                 onFocus={scrollToFocusedField}
               />
 
+              <Label>GPS location</Label>
+              <TouchableOpacity
+                style={styles.locationBtn}
+                onPress={handleCaptureLocation}
+                disabled={submitting || capturingLocation}
+                accessibilityRole="button"
+                accessibilityLabel="Save current location">
+                <MapPin size={16} color={colors.primary} />
+                <Text size="sm" fontWeight="$semibold" color={colors.primary}>
+                  {capturingLocation
+                    ? 'Getting location…'
+                    : gpsLatitude != null && gpsLongitude != null
+                      ? 'Update saved location'
+                      : 'Save current location'}
+                </Text>
+              </TouchableOpacity>
+              {gpsLatitude != null && gpsLongitude != null ? (
+                <HStack alignItems="center" gap="$1.5" mt="$2">
+                  <Navigation size={13} color={colors.textSecondary} />
+                  <Text size="xs" color={colors.textSecondary}>
+                    {gpsLatitude.toFixed(6)}, {gpsLongitude.toFixed(6)}
+                  </Text>
+                </HStack>
+              ) : (
+                <Text size="xs" color={colors.textMuted} mt="$1.5">
+                  Stand at the customer's place and tap the button to save it for directions later.
+                </Text>
+              )}
+
               <Label>NIC / Tax ID</Label>
               <TextInput
                 value={taxId}
@@ -399,5 +451,17 @@ const styles = StyleSheet.create({
   multiline: {
     minHeight: 72,
     textAlignVertical: 'top',
+  },
+  locationBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    backgroundColor: colors.primarySoft,
   },
 });

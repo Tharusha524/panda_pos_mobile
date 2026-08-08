@@ -40,4 +40,6 @@ export interface CustomerPayload {
   route: string;
   address_line1?: string | null;
   nic?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
 }

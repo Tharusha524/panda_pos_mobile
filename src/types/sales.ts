@@ -86,6 +86,8 @@ export interface CustomerSummary {
   tax_id?: string | null;
   credit_limit?: number;
   net_balance?: number;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export interface CartLine {

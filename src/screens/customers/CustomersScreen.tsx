@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { Box, HStack, Text, VStack } from '@gluestack-ui/themed';
 import { SmoothFlatList } from '@/components/common/SmoothFlatList';
-import { Mail, Phone, Pencil, Plus, User, Wallet } from 'lucide-react-native';
+import { Mail, Navigation, Phone, Pencil, Plus, User, Wallet } from 'lucide-react-native';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { AppHeader } from '@/components/common/AppHeader';
 import { LoadingOverlay } from '@/components/common/LoadingOverlay';
@@ -17,6 +17,7 @@ import { useDataRefreshNotify } from '@/context/DataRefreshContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { useCustomers } from '@/hooks/useCustomers';
 import { customerService } from '@/services/api/customerService';
+import { customerLocationService } from '@/services/location/customerLocationService';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -52,6 +53,24 @@ export const CustomersScreen: React.FC = () => {
       showError({ title: 'Customers', message: error });
     }
   }, [error, showError]);
+
+  const handleDirections = useCallback(
+    async (item: CustomerSummary) => {
+      if (item.latitude == null || item.longitude == null) {
+        return;
+      }
+      try {
+        await customerLocationService.openDirections(
+          item.latitude,
+          item.longitude,
+          item.customer_name,
+        );
+      } catch (e) {
+        showErrorFromUnknown(e, 'Open directions');
+      }
+    },
+    [showErrorFromUnknown],
+  );
 
   const handleEdit = useCallback(
     (item: CustomerSummary) => {
@@ -140,6 +159,18 @@ export const CustomersScreen: React.FC = () => {
               <Wallet size={16} color={colors.success} />
               <Text size="sm" fontWeight="$semibold" color={colors.success}>
                 Receive
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+          {item.latitude != null && item.longitude != null ? (
+            <TouchableOpacity
+              style={styles.actionBtn}
+              onPress={() => handleDirections(item)}
+              accessibilityRole="button"
+              accessibilityLabel={`Get directions to ${item.customer_name}`}>
+              <Navigation size={16} color={colors.primary} />
+              <Text size="sm" fontWeight="$semibold" color={colors.primary}>
+                Directions
               </Text>
             </TouchableOpacity>
           ) : null}
