@@ -20,6 +20,7 @@ import type { SystemReportPayload } from '@/types/reports';
 import type { BackendReportData } from '@/types/backendReports';
 import type { SystemReportHeader } from '@/types/reports';
 import { receiptPrintStorage } from '@/services/storage/receiptPrintStorage';
+import { receiptTitleImageStorage } from '@/services/storage/receiptTitleImageStorage';
 import { tokenStorage } from '@/services/storage/tokenStorage';
 import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
 import { buildEscPosRasterBandsBase64FromImage } from '@/utils/escPosRasterImage';
@@ -723,12 +724,33 @@ export const bluetoothPrintService = {
       }
     }
 
+    // Custom-size company name — printed as a separately-generated image (see
+    // ReceiptCustomizeScreen/receiptTitleImageStorage), same mechanism as the logo
+    // above. If it's missing or fails to print, we simply fall through to the normal
+    // text title line further down — never blocks the rest of the receipt.
+    let skipTitleText = false;
+    if (customization.titleFont === 'custom') {
+      const titleImage = await receiptTitleImageStorage.get();
+      if (titleImage) {
+        try {
+          const behavior = getPrinterProfileBehavior(
+            await resolvePrinterProfile(saved.profile),
+          );
+          await printLocalLogoFile(saved.type, titleImage.filePath, behavior);
+          skipTitleText = true;
+        } catch {
+          /* continue with text title if the image print fails */
+        }
+      }
+    }
+
     const text = buildEscPosPrintText(receipt, {
       currency,
       customization,
       settings,
       cashierName: cashier?.name,
       customerOutstandingBalance,
+      skipTitleText,
     });
     await sendRawText(saved.type, text, saved.profile);
   },

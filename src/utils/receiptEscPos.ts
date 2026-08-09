@@ -3,12 +3,18 @@ import {
   PURCHASE_RECEIPT_TITLE,
   RECEIPT_SOFTWARE_PROVIDER,
   RECEIPT_SOFTWARE_WEBSITE,
+  getSaleReceiptTitle,
 } from '@/constants/receiptBranding';
 import type { SaleReceiptPayload } from '@/types/sales';
 import type { PurchaseReceiptPayload } from '@/types/inventory';
 import type { PosMobileSettings } from '@/types/settings';
 import type { ReceiptPrintCustomization } from '@/types/receiptPrint';
-import { resolveCurrencyCode, formatPrintAmount, formatPlainAmount } from '@/utils/format';
+import {
+  resolveCurrencyCode,
+  formatPrintAmount,
+  formatPlainAmount,
+  getCurrencyLabel,
+} from '@/utils/format';
 import { formatQtyWithUom, formatReceiptQtyDetail, resolveLineUom } from '@/utils/uom';
 import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
 import {
@@ -35,6 +41,10 @@ export type BuildEscPosOptions = {
    * from "Balance", which is just this transaction's change due. Only printed when
    * the sale has a customer and this is provided. */
   customerOutstandingBalance?: number | null;
+  /** True when a custom-size company-name image was printed separately just before
+   * this text body — skips the plain-text title line so the name doesn't print twice.
+   * Defaults to false (unchanged behavior) when omitted. */
+  skipTitleText?: boolean;
 };
 
 // Item-table columns (Item Name / Qty / Price / Amount) only fit as one line on wider
@@ -66,32 +76,51 @@ export const buildEscPosReceipt = (
     (sale as { is_hold?: boolean }).is_hold ||
     (sale as { order_status?: string }).order_status === 'hold';
 
-  // Header — company name, address, phone only.
+  // Header — company name, address, phone, plus email/tax id/registration
+  // (matching the on-screen receipt preview) when present and enabled.
   const company = header.company_name ?? DEFAULT_RECEIPT_STORE_NAME;
-  lines.push(escTitleLine(ctx, company));
+  if (!options?.skipTitleText) {
+    lines.push(escTitleLine(ctx, company));
+  }
   if (header.address_line ?? header.address) {
     lines.push(escHeaderLine(ctx, String(header.address_line ?? header.address)));
   }
   if (customization.showPhone && header.phone) {
     lines.push(escHeaderLine(ctx, `Tel: ${header.phone}`));
   }
-
-  if (isHold) {
-    lines.push(escLine(ctx, ''));
-    lines.push(escHeaderLine(ctx, 'HOLD ORDER'));
-    lines.push(escHeaderLine(ctx, 'NOT PAID — Complete to finalize'));
-  } else if (isReturn) {
-    lines.push(escLine(ctx, ''));
-    lines.push(escHeaderLine(ctx, 'SALES RETURN'));
+  if (customization.showEmail && header.email) {
+    lines.push(escHeaderLine(ctx, String(header.email)));
   }
+  if (customization.showTaxId && header.tax_id) {
+    lines.push(escHeaderLine(ctx, `Tax ID: ${header.tax_id}`));
+  }
+  if (customization.showRegistration && header.registration_number) {
+    lines.push(escHeaderLine(ctx, `Reg: ${header.registration_number}`));
+  }
+
   lines.push(escDivider(ctx));
 
-  // Date / Time / Cashier / Sales receipt # — ledger rows (unaffected by center
-  // alignment), matching the rest of the totals-style content below.
+  // Bill title — "SALES RECEIPT" / "HOLD ORDER" / "SALES RETURN", matching the
+  // on-screen receipt preview's bold heading (previously only shown for hold/return).
+  lines.push(escHeaderLine(ctx, getSaleReceiptTitle({ isHold, isReturn })));
+  if (isHold) {
+    lines.push(escHeaderLine(ctx, 'NOT PAID — Complete to finalize'));
+  }
+  const currencyLabel = getCurrencyLabel(
+    options?.currency ?? options?.settings?.company?.currency,
+  );
+  lines.push(escHeaderLine(ctx, `All amounts in ${currencyLabel}`));
+  lines.push(escDivider(ctx));
+
+  // Date / Time / Branch / Cashier / Sales receipt # — ledger rows (unaffected by
+  // center alignment), matching the rest of the totals-style content below.
   const timeStr = sanitizeForPrint(
     new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
   );
   lines.push(escPadLine(ctx, sale.sale_date, timeStr));
+  if (sale.location) {
+    lines.push(escPadLine(ctx, 'Branch', sale.location.slice(0, 18)));
+  }
   if (options?.cashierName?.trim()) {
     lines.push(escPadLine(ctx, 'Cashier', options.cashierName.trim().slice(0, 18)));
   }
@@ -153,6 +182,9 @@ export const buildEscPosReceipt = (
       pct != null && pct > 0 ? `${baseLabel} (${pct}%)` : baseLabel;
     lines.push(escPadLine(ctx, discountLabel, `-${formatPlainAmount(sale.discount)}`));
   }
+  if ((sale.service_charge ?? 0) > 0) {
+    lines.push(escPadLine(ctx, 'Service charge', formatPlainAmount(sale.service_charge ?? 0)));
+  }
   lines.push(escDivider(ctx));
   lines.push(escPadLine(ctx, isHold ? 'Amount due' : 'Total', formatPlainAmount(sale.net_amount)));
   lines.push(escDivider(ctx, '='));
@@ -191,11 +223,23 @@ export const buildEscPosReceipt = (
     lines.push(escDivider(ctx));
     lines.push(escLine(ctx, 'Customer Details', 'left'));
     lines.push(escPadLine(ctx, 'Name', sale.customer_name.slice(0, 18)));
+    if (sale.customer_code) {
+      lines.push(escPadLine(ctx, 'Customer ID', sale.customer_code.slice(0, 18)));
+    }
     if (sale.customer_contact_no) {
       lines.push(escPadLine(ctx, 'Phone No', sale.customer_contact_no.slice(0, 18)));
     }
+    if (sale.customer_email) {
+      lines.push(escPadLine(ctx, 'Email', sale.customer_email.slice(0, 18)));
+    }
+    if (sale.customer_route) {
+      lines.push(escPadLine(ctx, 'Route', sale.customer_route.slice(0, 18)));
+    }
     if (sale.customer_address) {
       lines.push(escPadLine(ctx, 'Address', sale.customer_address.slice(0, 18)));
+    }
+    if (sale.customer_tax_id) {
+      lines.push(escPadLine(ctx, 'Tax ID', sale.customer_tax_id.slice(0, 18)));
     }
   }
 
@@ -204,6 +248,17 @@ export const buildEscPosReceipt = (
   lines.push(escDivider(ctx));
   lines.push(escHeaderLine(ctx, RECEIPT_SOFTWARE_PROVIDER));
   lines.push(escHeaderLine(ctx, RECEIPT_SOFTWARE_WEBSITE));
+  lines.push(
+    escHeaderLine(
+      ctx,
+      `Printed: ${sanitizeForPrint(
+        `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+        })}`,
+      )}`,
+    ),
+  );
   lines.push(escLine(ctx, ''));
   lines.push(escLine(ctx, ''));
 

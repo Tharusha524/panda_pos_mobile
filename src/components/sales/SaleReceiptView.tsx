@@ -77,6 +77,7 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
     { label: 'Phone', value: sale.customer_contact_no },
     { label: 'Email', value: sale.customer_email },
     { label: 'Location', value: sale.customer_location },
+    { label: 'Route', value: sale.customer_route },
     { label: 'Address', value: sale.customer_address },
     { label: 'Tax ID', value: sale.customer_tax_id },
   ].filter(row => Boolean(row.value && String(row.value).trim().length > 0));

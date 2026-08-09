@@ -481,6 +481,8 @@ export const SaleOrderScreen: React.FC = () => {
           receipt.sale.customer_email ?? activeCustomer?.email ?? null,
         customer_location:
           receipt.sale.customer_location ?? activeCustomer?.location ?? null,
+        customer_route:
+          receipt.sale.customer_route ?? activeCustomer?.route ?? null,
         customer_address:
           receipt.sale.customer_address ?? activeCustomer?.address ?? null,
         customer_tax_id:

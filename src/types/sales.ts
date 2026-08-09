@@ -154,6 +154,7 @@ export interface SaleReceiptPayload {
     customer_contact_no?: string | null;
     customer_email?: string | null;
     customer_location?: string | null;
+    customer_route?: string | null;
     customer_address?: string | null;
     customer_tax_id?: string | null;
     sub_total: number;

@@ -27,6 +27,9 @@ const titleOpen: Record<ReceiptTitleFont, string> = {
   normal: '<C>',
   large: '<CD>',
   bold: '<CB>',
+  // Normally rendered as an image (see receiptTitleImageStorage) and this tag is
+  // never used — kept only as a safe text fallback if that image is unavailable.
+  custom: '<C>',
 };
 
 const padLine = (left: string, right: string, width: number): string => {
