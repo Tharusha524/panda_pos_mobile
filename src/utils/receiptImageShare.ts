@@ -76,7 +76,7 @@ async function waitForReceiptLayout(): Promise<void> {
   await new Promise<void>(resolve => setTimeout(resolve, 350));
 }
 
-export async function captureFromViewShotRef(
+async function captureFromViewShotRef(
   viewShotRef: ReceiptCaptureRef,
 ): Promise<string> {
   await waitForReceiptLayout();

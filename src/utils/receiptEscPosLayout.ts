@@ -27,9 +27,6 @@ const titleOpen: Record<ReceiptTitleFont, string> = {
   normal: '<C>',
   large: '<CD>',
   bold: '<CB>',
-  // Normally rendered as an image (see receiptTitleImageStorage) and this tag is
-  // never used — kept only as a safe text fallback if that image is unavailable.
-  custom: '<C>',
 };
 
 const padLine = (left: string, right: string, width: number): string => {
@@ -59,8 +56,49 @@ export const escHeaderLine = (
   text: string,
 ): string => escLine(ctx, text, ctx.customization.headerAlign);
 
-export const escTitleLine = (ctx: ReceiptLayoutContext, text: string): string =>
-  `${titleOpen[ctx.customization.titleFont]}${text}\n`;
+// Breaks text into lines no longer than `width`, splitting only on spaces so
+// words are never cut mid-way — falls back to the whole string if it's short
+// enough or has no spaces to break on.
+const wrapWords = (text: string, width: number): string[] => {
+  if (width <= 0 || text.length <= width) {
+    return [text];
+  }
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length > width && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) {
+    lines.push(current);
+  }
+  return lines.length ? lines : [text];
+};
+
+export const escTitleLine = (ctx: ReceiptLayoutContext, text: string): string => {
+  if (ctx.customization.titleFont === 'large') {
+    // Double-width printing halves the usable columns per line, so wrap on
+    // word boundaries at half the paper width — otherwise long company names
+    // overflow the printer's own line buffer and get cut mid-word instead of
+    // centering cleanly.
+    const width = Math.max(1, Math.floor(ctx.lineWidth / 2));
+    const wrapped = wrapWords(text, width);
+    // Leading blank <C> line absorbs a "first command" glitch on some
+    // cheap/clone thermal printers, which corrupt whatever ESC/POS command
+    // happens to be first in the job (printing its identifier byte as a
+    // literal character) but parse every command after that correctly.
+    // This sacrifices one throwaway blank line so that stray character
+    // lands isolated above the title instead of glued onto the company name.
+    return `<C>\n${wrapped.map(line => `${titleOpen.large}${line}\n`).join('')}`;
+  }
+  return `${titleOpen[ctx.customization.titleFont]}${text}\n`;
+};
 
 export const escDivider = (ctx: ReceiptLayoutContext, char = '-'): string =>
   escLine(ctx, char.repeat(ctx.lineWidth), ctx.customization.bodyAlign);
