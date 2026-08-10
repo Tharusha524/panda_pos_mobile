@@ -27,6 +27,9 @@ const titleOpen: Record<ReceiptTitleFont, string> = {
   normal: '<C>',
   large: '<CD>',
   bold: '<CB>',
+  // Normally rendered as an image (see receiptTitleImageStorage) and this tag is
+  // never used — kept only as a safe text fallback if that image is unavailable.
+  custom: '<C>',
 };
 
 const padLine = (left: string, right: string, width: number): string => {
@@ -89,13 +92,12 @@ export const escTitleLine = (ctx: ReceiptLayoutContext, text: string): string =>
     // centering cleanly.
     const width = Math.max(1, Math.floor(ctx.lineWidth / 2));
     const wrapped = wrapWords(text, width);
-    // Leading blank <C> line absorbs a "first command" glitch on some
-    // cheap/clone thermal printers, which corrupt whatever ESC/POS command
-    // happens to be first in the job (printing its identifier byte as a
-    // literal character) but parse every command after that correctly.
-    // This sacrifices one throwaway blank line so that stray character
-    // lands isolated above the title instead of glued onto the company name.
-    return `<C>\n${wrapped.map(line => `${titleOpen.large}${line}\n`).join('')}`;
+    // No leading sacrificial blank line here anymore — that only relocated a
+    // printer "first command" glitch onto its own visible line instead of
+    // actually hiding it. The warm-up byte glued onto the front of the raw
+    // write (see WARM_UP_BYTE_BASE64 in bluetoothPrintService.ts) absorbs it
+    // invisibly instead, so this can go straight to the real title line.
+    return wrapped.map(line => `${titleOpen.large}${line}\n`).join('');
   }
   return `${titleOpen[ctx.customization.titleFont]}${text}\n`;
 };

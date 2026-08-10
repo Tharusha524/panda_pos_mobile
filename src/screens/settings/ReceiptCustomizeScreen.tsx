@@ -1,5 +1,6 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Image, Pressable, Switch, StyleSheet } from 'react-native';
+import ViewShot, { type ViewShotRef } from 'react-native-view-shot';
 import { useFocusEffect } from '@react-navigation/native';
 import { Box, HStack, Text, VStack } from '@gluestack-ui/themed';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
@@ -12,6 +13,8 @@ import { usePosSettings } from '@/context/PosSettingsContext';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { receiptLogoStorage } from '@/services/storage/receiptLogoStorage';
 import { receiptPrintStorage } from '@/services/storage/receiptPrintStorage';
+import { receiptTitleImageStorage } from '@/services/storage/receiptTitleImageStorage';
+import { captureFromViewShotRef } from '@/utils/receiptImageShare';
 import { RECEIPT_SOFTWARE_PROVIDER, RECEIPT_SOFTWARE_WEBSITE } from '@/constants/receiptBranding';
 import { pickReceiptLogoFromGallery } from '@/utils/pickReceiptLogo';
 import { resolveReceiptLogo } from '@/utils/receiptLogoResolver';
@@ -91,6 +94,10 @@ const ToggleRow: React.FC<{
   </HStack>
 );
 
+const TITLE_SIZE_MIN = 14;
+const TITLE_SIZE_MAX = 48;
+const TITLE_SIZE_STEP = 2;
+
 export const ReceiptCustomizeScreen: React.FC = () => {
   const { settings } = usePosSettings();
   const { showError } = useErrorDialog();
@@ -101,6 +108,7 @@ export const ReceiptCustomizeScreen: React.FC = () => {
   const [testing, setTesting] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [logoPreviewUri, setLogoPreviewUri] = useState<string | null>(null);
+  const titleShotRef = useRef<ViewShotRef>(null);
 
   const load = useCallback(async () => {
     const saved = await receiptPrintStorage.get();
@@ -130,6 +138,16 @@ export const ReceiptCustomizeScreen: React.FC = () => {
   const handleSave = async () => {
     setSaving(true);
     try {
+      if (form.titleFont === 'custom') {
+        // Snapshot the live-sized preview below and cache it — this image is what
+        // actually prints in place of the plain-text title (see bluetoothPrintService).
+        const uri = await captureFromViewShotRef(titleShotRef);
+        await receiptTitleImageStorage.saveFromUri(uri);
+      } else {
+        // Not in custom mode — clear any previously cached image so it can't be
+        // used stale if custom mode is picked again later without resaving.
+        await receiptTitleImageStorage.clear();
+      }
       await receiptPrintStorage.save(form);
       showError({
         title: 'Saved',
@@ -149,6 +167,7 @@ export const ReceiptCustomizeScreen: React.FC = () => {
 
   const handleReset = async () => {
     await receiptPrintStorage.reset();
+    await receiptTitleImageStorage.clear();
     await load();
   };
 
@@ -339,8 +358,65 @@ export const ReceiptCustomizeScreen: React.FC = () => {
                 { id: 'normal', label: 'Normal' },
                 { id: 'large', label: 'Large' },
                 { id: 'bold', label: 'Bold' },
+                { id: 'custom', label: 'Custom size' },
               ]}
             />
+            {form.titleFont === 'custom' ? (
+              <VStack mb="$4">
+                <Text fontSize="$xs" fontWeight="$semibold" color="$textLight400" mb="$2">
+                  Custom size ({form.titleFontSizePx}px)
+                </Text>
+                <HStack alignItems="center" gap="$3" mb="$3">
+                  <Pressable
+                    onPress={() =>
+                      patch({
+                        titleFontSizePx: Math.max(
+                          TITLE_SIZE_MIN,
+                          form.titleFontSizePx - TITLE_SIZE_STEP,
+                        ),
+                      })
+                    }
+                    style={styles.stepperBtn}>
+                    <Text fontSize="$lg" fontWeight="$bold" color={colors.primary}>
+                      −
+                    </Text>
+                  </Pressable>
+                  <Text fontSize="$sm" fontWeight="$semibold" color="$textLight0">
+                    {form.titleFontSizePx}px
+                  </Text>
+                  <Pressable
+                    onPress={() =>
+                      patch({
+                        titleFontSizePx: Math.min(
+                          TITLE_SIZE_MAX,
+                          form.titleFontSizePx + TITLE_SIZE_STEP,
+                        ),
+                      })
+                    }
+                    style={styles.stepperBtn}>
+                    <Text fontSize="$lg" fontWeight="$bold" color={colors.primary}>
+                      +
+                    </Text>
+                  </Pressable>
+                </HStack>
+                {/* Live preview — also the exact image captured and printed on Save
+                    (see handleSave / receiptTitleImageStorage). */}
+                <ViewShot
+                  ref={titleShotRef}
+                  options={{ format: 'png', quality: 1, result: 'tmpfile' }}
+                  style={styles.titlePreviewBox}>
+                  <Text
+                    style={{
+                      fontSize: form.titleFontSizePx,
+                      fontWeight: 'bold',
+                      textAlign: 'center',
+                      color: colors.text,
+                    }}>
+                    {companyName}
+                  </Text>
+                </ViewShot>
+              </VStack>
+            ) : null}
             <AuthInput
               label="Footer message"
               value={form.footerMessage}
@@ -423,6 +499,22 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderRadius: 8,
     backgroundColor: colors.backgroundAlt,
+  },
+  stepperBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  titlePreviewBox: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    padding: 12,
   },
   previewMono: {
     fontFamily: 'monospace',

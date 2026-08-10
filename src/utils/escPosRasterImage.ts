@@ -35,9 +35,20 @@ const base64ToBytes = (base64: string): Uint8Array => {
 const ESC = 0x1b;
 const SELECT_BIT_IMAGE_MODE = [ESC, 0x2a, 33];
 const SET_LINE_SPACE_24 = [ESC, 0x33, 24];
-const SET_LINE_SPACE_32 = [ESC, 0x33, 32];
+const SET_LINE_SPACE_AFTER_LOGO = [ESC, 0x33, 14]; // shrink the gap after the logo before the next line
 const LINE_FEED = [0x0a];
 const CENTER_ALIGN = [ESC, 0x61, 1];
+
+// Some cheap/clone thermal printers corrupt the leading byte(s) of a raw write —
+// misprinting a command's identifier byte as a literal character — right after a
+// gap in transmission, e.g. the write for one raster image (logo, title) starting
+// right after the previous one finished (see the same issue and fix for the text
+// path in escPosDirectPrint.ts). Unlike there, a real line-feed byte isn't safe to
+// use as the throwaway prefix here — if it executes untouched, it physically
+// advances the paper and reopens the exact "gap before the logo/title" complaint
+// this was tuned to avoid. NUL bytes have no printable glyph and don't move the
+// paper either way, so they're silent regardless of whether the glitch lands here.
+const GLITCH_GUARD_BYTES = [0x00, 0x00, 0x00, 0x00];
 
 const shouldPrintColor = (r: number, g: number, b: number, a: number): boolean => {
   if (a < 128) {
@@ -214,11 +225,11 @@ export const buildEscPosRasterBase64FromImage = (
   maxWidth = 384,
 ): string => {
   const bands = prepareRasterBands(imageBase64, maxWidth);
-  const out: number[] = [...SET_LINE_SPACE_24, ...CENTER_ALIGN];
+  const out: number[] = [...GLITCH_GUARD_BYTES, ...SET_LINE_SPACE_24, ...CENTER_ALIGN];
   for (const band of bands) {
     out.push(...band);
   }
-  out.push(...SET_LINE_SPACE_32, ...LINE_FEED);
+  out.push(...SET_LINE_SPACE_AFTER_LOGO, ...LINE_FEED);
   return bytesToBase64(out);
 };
 
@@ -235,8 +246,8 @@ export const buildEscPosRasterBandsBase64FromImage = (
   maxWidth = 384,
 ): string[] => {
   const bands = prepareRasterBands(imageBase64, maxWidth);
-  const header = [...SET_LINE_SPACE_24, ...CENTER_ALIGN];
-  const footer = [...SET_LINE_SPACE_32, ...LINE_FEED];
+  const header = [...GLITCH_GUARD_BYTES, ...SET_LINE_SPACE_24, ...CENTER_ALIGN];
+  const footer = [...SET_LINE_SPACE_AFTER_LOGO, ...LINE_FEED];
 
   if (bands.length === 0) {
     return [bytesToBase64([...header, ...footer])];

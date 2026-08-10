@@ -1,5 +1,5 @@
 import type { EscPosPrintOptions } from '@/utils/escPosPrintOptions';
-import { bytesToBase64 } from '@/utils/escPosBase64';
+import { base64ToBytes, bytesToBase64 } from '@/utils/escPosBase64';
 
 type ExchangeTextFn = (text: string, options?: EscPosPrintOptions) => { toString: (enc: string) => string };
 
@@ -29,13 +29,75 @@ export const stripFancyEscPosTags = (text: string): string =>
 export const normalizeEscPosNewlines = (text: string): string =>
   text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
+// react-native-thermal-receipt-printer's EPToolkit.exchange_text unconditionally
+// prepends a full printer-initialize command (ESC @ — bytes 0x1B, 0x40) to every
+// payload it builds, every time it's called. That's fine as a cold-start reset,
+// but every one of our print jobs (see sendRawText) is really issued mid-session,
+// right after the logo's raster image finishes — and some clone thermal printers
+// mishandle a full reset that soon after raster data, misprinting its identifier
+// byte as a literal stray character (the "2"/"3"/"a" seen right before the
+// company name, regardless of title font or line layout — every layout variant
+// hit this same ESC @ first). It's safe to drop: the library's own line-spacing
+// reset immediately follows it, and it resets formatting after every line anyway.
+const PRINTER_INIT_BYTES = [0x1b, 0x40];
+
+const stripLeadingPrinterInit = (base64: string): string => {
+  const bytes = base64ToBytes(base64);
+  if (bytes[0] === PRINTER_INIT_BYTES[0] && bytes[1] === PRINTER_INIT_BYTES[1]) {
+    return bytesToBase64(bytes.subarray(2));
+  }
+  return base64;
+};
+
+// Separately from the ESC @ issue above: this printer also glitches specifically
+// on the multi-byte command EPToolkit sends to switch into the large/bold company
+// -name font (double-width/double-height + user-defined-font-size). Its own
+// leading byte gets misread and printed as a stray digit — glued directly onto
+// the company name itself, which also throws off our word-wrap width by one
+// character (splitting words like "PRODUCTS" mid-word). This happens wherever the
+// command lands in the stream, not just at a write boundary, so the warm-up-byte
+// fix above doesn't cover it. Fix: splice a few inert NUL bytes directly in front
+// of each occurrence of the exact command bytes — NUL has no printable glyph on
+// any thermal printer, unlike a real command, so even if the glitch lands there
+// instead, nothing visible prints.
+const RISKY_COMMAND_SEQUENCES: readonly number[][] = [
+  [27, 97, 1, 27, 33, 32, 28, 33, 4], // <CD> large title font
+  [27, 97, 1, 27, 33, 48, 28, 33, 12], // <CB> bold title font
+  [27, 97, 1, 27, 33, 16, 28, 33, 8], // <CM> medium title font
+];
+const GLITCH_GUARD_BYTES: readonly number[] = [0, 0, 0, 0];
+
+const matchesAt = (bytes: Uint8Array, offset: number, seq: number[]): boolean => {
+  if (offset + seq.length > bytes.length) {
+    return false;
+  }
+  for (let j = 0; j < seq.length; j++) {
+    if (bytes[offset + j] !== seq[j]) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const guardRiskyCommands = (bytes: Uint8Array): Uint8Array => {
+  const out: number[] = [];
+  for (let i = 0; i < bytes.length; i++) {
+    if (RISKY_COMMAND_SEQUENCES.some(seq => matchesAt(bytes, i, seq))) {
+      out.push(...GLITCH_GUARD_BYTES);
+    }
+    out.push(bytes[i]);
+  }
+  return Uint8Array.from(out);
+};
+
 export const buildEscPosBase64Payload = (
   text: string,
   options: EscPosPrintOptions,
 ): string => {
   const exchangeText = loadExchangeText();
   const buffer = exchangeText(normalizeEscPosNewlines(text), options);
-  return buffer.toString('base64');
+  const withoutInit = base64ToBytes(stripLeadingPrinterInit(buffer.toString('base64')));
+  return bytesToBase64(guardRiskyCommands(withoutInit));
 };
 
 /** Plain ASCII feed after body — helps mini printers eject paper without cut command. */

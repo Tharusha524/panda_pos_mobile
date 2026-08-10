@@ -41,6 +41,10 @@ export type BuildEscPosOptions = {
    * from "Balance", which is just this transaction's change due. Only printed when
    * the sale has a customer and this is provided. */
   customerOutstandingBalance?: number | null;
+  /** True when a custom-size company-name image was printed separately just before
+   * this text body — skips the plain-text title line so the name doesn't print twice.
+   * Defaults to false (unchanged behavior) when omitted. */
+  skipTitleText?: boolean;
 };
 
 // Item-table columns (Item Name / Qty / Price / Amount) only fit as one line on wider
@@ -75,7 +79,9 @@ export const buildEscPosReceipt = (
   // Header — company name, address, phone, plus email/tax id/registration
   // (matching the on-screen receipt preview) when present and enabled.
   const company = header.company_name ?? DEFAULT_RECEIPT_STORE_NAME;
-  lines.push(escTitleLine(ctx, company));
+  if (!options?.skipTitleText) {
+    lines.push(escTitleLine(ctx, company));
+  }
   if (header.address_line ?? header.address) {
     lines.push(escHeaderLine(ctx, String(header.address_line ?? header.address)));
   }

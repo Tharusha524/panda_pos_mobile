@@ -20,6 +20,7 @@ import type { SystemReportPayload } from '@/types/reports';
 import type { BackendReportData } from '@/types/backendReports';
 import type { SystemReportHeader } from '@/types/reports';
 import { receiptPrintStorage } from '@/services/storage/receiptPrintStorage';
+import { receiptTitleImageStorage } from '@/services/storage/receiptTitleImageStorage';
 import { tokenStorage } from '@/services/storage/tokenStorage';
 import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
 import { buildEscPosRasterBandsBase64FromImage } from '@/utils/escPosRasterImage';
@@ -352,16 +353,19 @@ const printRawDataChunked = async (
  * native printRawData, so it's just as prone to dropping bytes on long receipts; going
  * straight there ourselves lets us chunk it (see printRawDataChunked).
  */
-// Some cheap/clone thermal printers corrupt the very first ESC/POS command of
-// a print job — instead of consuming its control bytes silently, they print
-// the command's identifier byte as a literal character (seen as a stray "2"
-// or similar right before the first line). Sending one bare line-feed byte
-// as its own tiny transmission first absorbs that glitch invisibly — a lone
-// 0x0A has no "identifier byte" to leak since it isn't an ESC-prefixed
-// command, so by the time the real receipt follows, the printer is past
-// whatever warm-up quirk causes this and prints its first real command clean.
+// Some cheap/clone thermal printers corrupt the leading byte(s) of a raw
+// write — instead of consuming a command's control bytes silently, they
+// print its identifier byte as a literal character (seen as a stray "2" or
+// similar right before the first line). This isn't only the first-ever
+// command of the whole job: it recurs at the start of *any* new native
+// write, e.g. the write right after the logo's raster bands. So the warm-up
+// byte has to be glued onto the front of the real payload's own write
+// (below) rather than sent as its own separate transmission — otherwise the
+// payload's first real command just becomes the new "first byte of a write"
+// and takes the same hit the warm-up was meant to absorb. A lone 0x0A has no
+// identifier byte to leak since it isn't an ESC-prefixed command, so
+// whichever byte the glitch lands on, it's invisible.
 const WARM_UP_BYTE_BASE64 = 'Cg==';
-const WARM_UP_SETTLE_MS = 60;
 
 const sendRawText = async (
   type: PrinterConnectionType,
@@ -376,11 +380,13 @@ const sendRawText = async (
   const waitMs = estimatePrintDelayMs(prepared, behavior.printDelayMultiplier);
 
   const sendOnce = async (): Promise<void> => {
-    await printRawDataNative(type, WARM_UP_BYTE_BASE64, WARM_UP_SETTLE_MS);
     let base64 = buildEscPosBase64Payload(prepared, options);
     if (behavior.useDirectRawPrint) {
       base64 = appendMiniPrinterFeed(base64);
     }
+    // Glue the warm-up byte onto the front of this same write — see comment
+    // on WARM_UP_BYTE_BASE64 above for why it can't be its own transmission.
+    base64 = bytesToBase64([...base64ToBytes(WARM_UP_BYTE_BASE64), ...base64ToBytes(base64)]);
     await printRawDataChunked(type, base64, waitMs, behavior.printDelayMultiplier);
   };
 
@@ -735,12 +741,33 @@ export const bluetoothPrintService = {
       }
     }
 
+    // Custom-size company name — printed as a separately-generated image (see
+    // ReceiptCustomizeScreen/receiptTitleImageStorage), same mechanism as the logo
+    // above. If it's missing or fails to print, we simply fall through to the normal
+    // text title line further down — never blocks the rest of the receipt.
+    let skipTitleText = false;
+    if (customization.titleFont === 'custom') {
+      const titleImage = await receiptTitleImageStorage.get();
+      if (titleImage) {
+        try {
+          const behavior = getPrinterProfileBehavior(
+            await resolvePrinterProfile(saved.profile),
+          );
+          await printLocalLogoFile(saved.type, titleImage.filePath, behavior);
+          skipTitleText = true;
+        } catch {
+          /* continue with text title if the image print fails */
+        }
+      }
+    }
+
     const text = buildEscPosPrintText(receipt, {
       currency,
       customization,
       settings,
       cashierName: cashier?.name,
       customerOutstandingBalance,
+      skipTitleText,
     });
     await sendRawText(saved.type, text, saved.profile);
   },
