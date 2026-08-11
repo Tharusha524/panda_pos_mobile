@@ -1,6 +1,7 @@
 import type { PosMobileSettings } from '@/types/settings';
 import type { PrintableReceipt } from '@/utils/receiptEscPos';
 import type { SystemReportHeader } from '@/types/reports';
+import { receiptPrintStorage } from '@/services/storage/receiptPrintStorage';
 import {
   DEFAULT_RECEIPT_PRINT_CUSTOMIZATION,
   type ReceiptPaperWidth,
@@ -65,6 +66,17 @@ export const mergeReceiptPrintSettings = (
   base.bodyAlign = 'center';
 
   return base;
+};
+
+/** Local device customization merged with server settings — the same merge
+ * bluetoothPrintService applies right before printing, exposed here so a screen
+ * can check `printAsImage` up front (e.g. to decide whether to capture the
+ * on-screen receipt preview before calling printReceipt). */
+export const getReceiptPrintCustomization = async (
+  settings?: PosMobileSettings | null,
+): Promise<ReceiptPrintCustomization> => {
+  const local = await receiptPrintStorage.get();
+  return mergeReceiptPrintSettings(settings, local);
 };
 
 /** @deprecated Use resolveReceiptLogo from receiptLogoResolver */

@@ -23,6 +23,7 @@ import { receiptPrintStorage } from '@/services/storage/receiptPrintStorage';
 import { receiptTitleImageStorage } from '@/services/storage/receiptTitleImageStorage';
 import { tokenStorage } from '@/services/storage/tokenStorage';
 import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
+import type { ReceiptPaperWidth } from '@/types/receiptPrint';
 import { buildEscPosRasterBandsBase64FromImage } from '@/utils/escPosRasterImage';
 import { base64ToBytes, bytesToBase64 } from '@/utils/escPosBase64';
 import {
@@ -464,24 +465,22 @@ const printRemoteLogoImage = async (
   });
 };
 
-const printLocalLogoFile = async (
+// Stream raster bands band-by-band (each band is a complete, self-contained raster
+// command — see buildEscPosRasterBandsBase64FromImage) instead of one big write
+// followed by one long settle wait. The printer processes each band while the next
+// is being sent, so only the final band needs a real settle delay afterward — the
+// total pause ends up much shorter than sending everything at once. Shared by the
+// logo/title-image path and the full-receipt-as-image path below.
+const printRasterBands = async (
   type: PrinterConnectionType,
-  filePath: string,
+  bands: string[],
   behavior: PrinterProfileBehavior,
 ): Promise<void> => {
-  const imageBase64 = await RNBlobUtil.fs.readFile(filePath, 'base64');
-  const bands = buildEscPosRasterBandsBase64FromImage(imageBase64, behavior.logoMaxWidthPx);
-
   const native = type === 'network' ? NativeModules.RNNetPrinter : NativeModules.RNBLEPrinter;
   if (!native?.printRawData) {
     throw new Error('Printer does not support raw image output');
   }
 
-  // Stream the logo band-by-band (each band is a complete, self-contained raster
-  // command — see buildEscPosRasterBandsBase64FromImage) instead of one big write
-  // followed by one long settle wait. The printer processes each band while the next
-  // is being sent, so only the final band needs a real settle delay afterward — the
-  // total pause ends up much shorter than sending everything at once.
   const interBandDelay = Math.round(RAW_CHUNK_DELAY_MS * behavior.printDelayMultiplier);
   for (let i = 0; i < bands.length - 1; i++) {
     native.printRawData(bands[i], () => {});
@@ -495,6 +494,40 @@ const printLocalLogoFile = async (
     lastBand,
     estimateLogoPrintDelayMs(lastByteLength, behavior.printDelayMultiplier),
   );
+};
+
+const printLocalLogoFile = async (
+  type: PrinterConnectionType,
+  filePath: string,
+  behavior: PrinterProfileBehavior,
+): Promise<void> => {
+  const imageBase64 = await RNBlobUtil.fs.readFile(filePath, 'base64');
+  const bands = buildEscPosRasterBandsBase64FromImage(imageBase64, behavior.logoMaxWidthPx);
+  await printRasterBands(type, bands, behavior);
+};
+
+// Full printable paper width in dots — deliberately not the same as
+// logoMaxWidthPx above (that's kept narrow for the small logo/title image only,
+// tuned for mini-printer stability). 384 dots ≈ 58mm and 576 dots ≈ 80mm at the
+// standard 203dpi thermal print head resolution.
+const FULL_RECEIPT_RASTER_WIDTH_PX: Record<ReceiptPaperWidth, number> = {
+  '58mm': 384,
+  '80mm': 576,
+};
+
+/** Print a full receipt captured as one PNG (see receiptImageShare.captureReceiptBase64)
+ * as a raster image, instead of building it from ESC/POS text commands. */
+const printFullReceiptImage = async (
+  type: PrinterConnectionType,
+  imageBase64: string,
+  paperWidth: ReceiptPaperWidth,
+  behavior: PrinterProfileBehavior,
+): Promise<void> => {
+  const bands = buildEscPosRasterBandsBase64FromImage(
+    imageBase64,
+    FULL_RECEIPT_RASTER_WIDTH_PX[paperWidth],
+  );
+  await printRasterBands(type, bands, behavior);
 };
 
 const printResolvedLogo = async (
@@ -710,6 +743,10 @@ export const bluetoothPrintService = {
      * it when known so the receipt can show the customer's overall outstanding
      * balance, not just this transaction's change due. Omit if not on hand. */
     customerId?: number | null,
+    /** PNG (base64) of the on-screen receipt preview — see
+     * receiptImageShare.captureReceiptBase64. Only used when the "print receipt as
+     * image" setting is on; ignored (and safe to omit) otherwise. */
+    capturedImageBase64?: string,
   ): Promise<void> {
     if (!(await this.isConfigured())) {
       throw new Error(
@@ -720,6 +757,26 @@ export const bluetoothPrintService = {
     const saved = await resolveSavedPrinter();
     const localCustomization = await receiptPrintStorage.get();
     const customization = mergeReceiptPrintSettings(settings, localCustomization);
+
+    await connectAndPrepare(saved.type, saved.address, saved.profile);
+
+    if (customization.printAsImage && capturedImageBase64) {
+      try {
+        const behavior = getPrinterProfileBehavior(await resolvePrinterProfile(saved.profile));
+        await printFullReceiptImage(
+          saved.type,
+          capturedImageBase64,
+          customization.paperWidth,
+          behavior,
+        );
+        return;
+      } catch {
+        // Raster print failed (decode error, unsupported native call, etc.) — fall
+        // through to the normal text-based print below so the sale is never left
+        // without a printed receipt.
+      }
+    }
+
     const logo = await resolveReceiptLogo(receipt, settings);
     const cashier = await tokenStorage.getUser();
 
@@ -730,8 +787,6 @@ export const bluetoothPrintService = {
           .then(c => c.net_balance ?? null)
           .catch(() => null)
       : null;
-
-    await connectAndPrepare(saved.type, saved.address, saved.profile);
 
     if (customization.showLogo && logo) {
       try {

@@ -22,11 +22,40 @@ import {
   DEFAULT_RECEIPT_PRINT_CUSTOMIZATION,
   type ReceiptPaperWidth,
   type ReceiptPrintCustomization,
+  type ReceiptTextWeight,
   type ReceiptTitleFont,
 } from '@/types/receiptPrint';
 import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
 import { createReceiptLayout, previewLine } from '@/utils/receiptEscPosLayout';
+import { SaleReceiptView } from '@/components/sales/SaleReceiptView';
+import type { SaleReceiptPayload } from '@/types/sales';
 import { colors } from '@/theme';
+
+// Sample data for the live "print as image" preview below — same numbers as the
+// text-mode "Paper preview" mockup above, so the two sections stay consistent.
+const IMAGE_PREVIEW_RECEIPT: SaleReceiptPayload = {
+  sale: {
+    sales_id: 'SAL-0001',
+    sale_date: new Date().toISOString().slice(0, 10),
+    location: 'Main Location',
+    payment_method: 'Cash',
+    sub_total: 100,
+    discount: 0,
+    net_amount: 100,
+    amount_received: 100,
+    lines: [
+      {
+        item_number: '1',
+        description: 'Sample item',
+        qty: 1,
+        unit_price: 100,
+        line_total: 100,
+        uom: 'pcs',
+      },
+    ],
+  },
+  header: {},
+};
 
 const ChipRow: React.FC<{
   label: string;
@@ -93,6 +122,46 @@ const ToggleRow: React.FC<{
     />
   </HStack>
 );
+
+const SizeStepper: React.FC<{
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+}> = ({ label, value, min, max, step, onChange }) => (
+  <VStack mb="$4">
+    <Text fontSize="$xs" fontWeight="$semibold" color="$textLight400" mb="$2">
+      {label} ({value}px)
+    </Text>
+    <HStack alignItems="center" gap="$3">
+      <Pressable
+        onPress={() => onChange(Math.max(min, value - step))}
+        style={styles.stepperBtn}>
+        <Text fontSize="$lg" fontWeight="$bold" color={colors.primary}>
+          −
+        </Text>
+      </Pressable>
+      <Text fontSize="$sm" fontWeight="$semibold" color="$textLight0">
+        {value}px
+      </Text>
+      <Pressable
+        onPress={() => onChange(Math.min(max, value + step))}
+        style={styles.stepperBtn}>
+        <Text fontSize="$lg" fontWeight="$bold" color={colors.primary}>
+          +
+        </Text>
+      </Pressable>
+    </HStack>
+  </VStack>
+);
+
+const WEIGHT_OPTIONS = [
+  { id: 'regular', label: 'Regular' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'bold', label: 'Bold' },
+];
 
 const TITLE_SIZE_MIN = 14;
 const TITLE_SIZE_MAX = 48;
@@ -430,6 +499,72 @@ export const ReceiptCustomizeScreen: React.FC = () => {
             borderRadius="$2xl"
             borderWidth={1}
             borderColor="$borderLight300"
+            p="$4">
+            <Text fontSize="$sm" fontWeight="$bold" color="$textLight0" mb="$1">
+              Receipt appearance (image print)
+            </Text>
+            <Text fontSize="$xs" color="$textLight400" mb="$3">
+              Only affects "Print receipt as image" below — updates live as you adjust.
+            </Text>
+            <Box
+              bg="#fff"
+              borderWidth={1}
+              borderColor={colors.border}
+              borderRadius="$lg"
+              mb="$4"
+              overflow="hidden">
+              <SaleReceiptView
+                receipt={IMAGE_PREVIEW_RECEIPT}
+                settings={settings}
+                customizationOverride={form}
+              />
+            </Box>
+
+            <SizeStepper
+              label="Logo width"
+              value={form.receiptLogoWidthPx}
+              min={60}
+              max={220}
+              step={10}
+              onChange={v => patch({ receiptLogoWidthPx: v })}
+            />
+
+            <SizeStepper
+              label="Company name size"
+              value={form.receiptCompanyNameSizePx}
+              min={12}
+              max={36}
+              step={1}
+              onChange={v => patch({ receiptCompanyNameSizePx: v })}
+            />
+            <ChipRow
+              label="Company name weight"
+              value={form.receiptCompanyNameWeight}
+              onChange={id => patch({ receiptCompanyNameWeight: id as ReceiptTextWeight })}
+              options={WEIGHT_OPTIONS}
+            />
+
+            <SizeStepper
+              label="Body text size"
+              value={form.receiptBodyTextSizePx}
+              min={8}
+              max={20}
+              step={1}
+              onChange={v => patch({ receiptBodyTextSizePx: v })}
+            />
+            <ChipRow
+              label="Body text weight"
+              value={form.receiptBodyTextWeight}
+              onChange={id => patch({ receiptBodyTextWeight: id as ReceiptTextWeight })}
+              options={WEIGHT_OPTIONS}
+            />
+          </Box>
+
+          <Box
+            bg="$white"
+            borderRadius="$2xl"
+            borderWidth={1}
+            borderColor="$borderLight300"
             px="$4"
             pb="$2">
             <Text fontSize="$sm" fontWeight="$bold" color="$textLight0" py="$3">
@@ -466,6 +601,21 @@ export const ReceiptCustomizeScreen: React.FC = () => {
               label="Registration number"
               value={form.showRegistration}
               onChange={v => patch({ showRegistration: v })}
+            />
+          </Box>
+
+          <Box
+            bg="$white"
+            borderRadius="$2xl"
+            borderWidth={1}
+            borderColor="$borderLight300"
+            px="$4"
+            pb="$2">
+            <ToggleRow
+              label="Print receipt as image"
+              subtitle="Prints an exact copy of the on-screen receipt, instead of building it from text. Slower to print."
+              value={form.printAsImage}
+              onChange={v => patch({ printAsImage: v })}
             />
           </Box>
 

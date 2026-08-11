@@ -26,7 +26,6 @@ import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePurchaseCreateContext } from '@/context/PurchaseCreateContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { bankService, type BankAccount } from '@/services/api/bankService';
-import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { WALK_IN_SUPPLIER } from '@/services/api/supplierService';
 import { formatCurrency } from '@/utils/format';
 import { formatExpiryDate } from '@/utils/batchUtils';
@@ -70,7 +69,6 @@ export const PurchaseOrderScreen: React.FC = () => {
   const [chequeNumber, setChequeNumber] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [paymentCardLast4, setPaymentCardLast4] = useState('');
-  const [printing, setPrinting] = useState(false);
   const [priceDrafts, setPriceDrafts] = useState<Record<number, string>>({});
   const [qtyDrafts, setQtyDrafts] = useState<Record<number, string>>({});
 
@@ -247,24 +245,9 @@ export const PurchaseOrderScreen: React.FC = () => {
       return;
     }
 
-    setPrinting(true);
-    try {
-      if (bluetoothPrintService.isSupported()) {
-        await bluetoothPrintService.printReceipt(result.receipt, currency, settings);
-      }
-    } catch (e) {
-      showError({
-        title: 'Print',
-        message:
-          e instanceof Error
-            ? e.message
-            : 'Could not print bill. Set up your printer in Settings → Receipt printer.',
-        variant: 'warning',
-      });
-    } finally {
-      setPrinting(false);
-    }
-
+    // No auto-print here — land on the receipt screen so the cashier sees the
+    // preview first and prints from there (its own Print button), rather than a
+    // receipt firing silently before it's even been reviewed.
     navigation.replace('PurchaseReceipt', { receipt: result.receipt });
   };
 
@@ -295,15 +278,7 @@ export const PurchaseOrderScreen: React.FC = () => {
         showBack
       />
 
-      {purchase.submitting || printing ? (
-        <LoadingOverlay
-          message={
-            printing
-              ? 'Printing bill…'
-              : 'Saving purchase…'
-          }
-        />
-      ) : null}
+      {purchase.submitting ? <LoadingOverlay message="Saving purchase…" /> : null}
 
       <KeyboardAvoidingView
         style={styles.flex}
@@ -555,10 +530,10 @@ export const PurchaseOrderScreen: React.FC = () => {
             </Text>
           </HStack>
           <PrimaryButton
-            label={printing ? 'Printing…' : 'Save & Pay'}
+            label="Save & Pay"
             onPress={handleSave}
-            loading={purchase.submitting || printing}
-            disabled={purchase.submitting || printing}
+            loading={purchase.submitting}
+            disabled={purchase.submitting}
           />
         </View>
       </KeyboardAvoidingView>

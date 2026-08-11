@@ -50,12 +50,14 @@ const CENTER_ALIGN = [ESC, 0x61, 1];
 // paper either way, so they're silent regardless of whether the glitch lands here.
 const GLITCH_GUARD_BYTES = [0x00, 0x00, 0x00, 0x00];
 
-const shouldPrintColor = (r: number, g: number, b: number, a: number): boolean => {
+/** Effective grayscale luminance for dithering — mostly-transparent pixels are
+ * treated as plain white background (never printed), matching the old alpha
+ * cutoff this replaces. */
+const luminanceOf = (r: number, g: number, b: number, a: number): number => {
   if (a < 128) {
-    return false;
+    return 255;
   }
-  const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-  return luminance < 127;
+  return 0.299 * r + 0.587 * g + 0.114 * b;
 };
 
 const resizeRgba = (
@@ -69,37 +71,108 @@ const resizeRgba = (
   }
   const targetHeight = Math.max(1, Math.round((height * targetWidth) / width));
   const out = new Uint8Array(targetWidth * targetHeight * 4);
+
+  // Box-filter average instead of nearest-neighbor point sampling — picking a single
+  // source pixel per destination pixel can skip a thin 1-2px glyph stroke entirely
+  // when it happens to fall between sample points, which is what was dropping
+  // letters like "i"/"t"/"I" out of printed receipts. Averaging every source pixel
+  // that maps into a destination pixel means a thin stroke always contributes some
+  // darkness to the result, even if diluted, instead of an all-or-nothing coin flip.
   for (let y = 0; y < targetHeight; y++) {
-    const srcY = Math.min(height - 1, Math.floor((y * height) / targetHeight));
+    const srcY0 = Math.floor((y * height) / targetHeight);
+    const srcY1 = Math.max(srcY0 + 1, Math.floor(((y + 1) * height) / targetHeight));
     for (let x = 0; x < targetWidth; x++) {
-      const srcX = Math.min(width - 1, Math.floor((x * width) / targetWidth));
-      const srcIdx = (srcY * width + srcX) * 4;
+      const srcX0 = Math.floor((x * width) / targetWidth);
+      const srcX1 = Math.max(srcX0 + 1, Math.floor(((x + 1) * width) / targetWidth));
+
+      let rSum = 0;
+      let gSum = 0;
+      let bSum = 0;
+      let aSum = 0;
+      let count = 0;
+      for (let sy = srcY0; sy < srcY1 && sy < height; sy++) {
+        for (let sx = srcX0; sx < srcX1 && sx < width; sx++) {
+          const srcIdx = (sy * width + sx) * 4;
+          rSum += data[srcIdx];
+          gSum += data[srcIdx + 1];
+          bSum += data[srcIdx + 2];
+          aSum += data[srcIdx + 3];
+          count++;
+        }
+      }
+
       const dstIdx = (y * targetWidth + x) * 4;
-      out[dstIdx] = data[srcIdx];
-      out[dstIdx + 1] = data[srcIdx + 1];
-      out[dstIdx + 2] = data[srcIdx + 2];
-      out[dstIdx + 3] = data[srcIdx + 3];
+      if (count === 0) {
+        // Guards against a divide-by-zero; the math above should always produce at
+        // least one source pixel, but fall back to the nearest one rather than crash.
+        const srcIdx =
+          (Math.min(height - 1, srcY0) * width + Math.min(width - 1, srcX0)) * 4;
+        out[dstIdx] = data[srcIdx];
+        out[dstIdx + 1] = data[srcIdx + 1];
+        out[dstIdx + 2] = data[srcIdx + 2];
+        out[dstIdx + 3] = data[srcIdx + 3];
+        continue;
+      }
+      out[dstIdx] = Math.round(rSum / count);
+      out[dstIdx + 1] = Math.round(gSum / count);
+      out[dstIdx + 2] = Math.round(bSum / count);
+      out[dstIdx + 3] = Math.round(aSum / count);
     }
   }
   return { data: out, width: targetWidth, height: targetHeight };
 };
 
+/** Floyd–Steinberg error-diffusion dithering: converts the grayscale image to
+ * black/white dots while spreading each pixel's rounding error onto its
+ * not-yet-processed neighbors, instead of judging every pixel against a flat
+ * threshold in isolation. A flat threshold throws away any pixel lighter than
+ * mid-gray outright — including the lighter, anti-aliased edges of thin glyph
+ * strokes ("i", "t", "I") — which is what was making letters print with missing
+ * pieces. Dithering nudges that "almost dark enough" darkness onto a neighboring
+ * pixel instead of discarding it, so the stroke still reads as continuous on paper.
+ * Solid black/white regions (borders, logo fills) are unaffected — there's no
+ * rounding error to diffuse when a pixel is already at an extreme. */
 const buildPixelGrid = (
   rgba: Uint8Array,
   width: number,
   height: number,
 ): number[][] => {
-  const pixels: number[][] = [];
+  const luminance = new Float32Array(width * height);
   for (let y = 0; y < height; y++) {
-    const row: number[] = [];
     for (let x = 0; x < width; x++) {
       const i = (y * width + x) * 4;
-      row.push(
-        shouldPrintColor(rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]) ? 1 : 0,
-      );
+      luminance[y * width + x] = luminanceOf(rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]);
     }
-    pixels.push(row);
   }
+
+  const pixels: number[][] = [];
+  for (let y = 0; y < height; y++) {
+    pixels.push(new Array(width).fill(0));
+  }
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      const before = luminance[idx];
+      const print = before < 128;
+      pixels[y][x] = print ? 1 : 0;
+      const error = before - (print ? 0 : 255);
+
+      if (x + 1 < width) {
+        luminance[idx + 1] += error * (7 / 16);
+      }
+      if (y + 1 < height) {
+        if (x > 0) {
+          luminance[idx + width - 1] += error * (3 / 16);
+        }
+        luminance[idx + width] += error * (5 / 16);
+        if (x + 1 < width) {
+          luminance[idx + width + 1] += error * (1 / 16);
+        }
+      }
+    }
+  }
+
   return pixels;
 };
 

@@ -116,7 +116,11 @@ export async function captureFromViewShotRef(
   throw new Error('Could not capture receipt image. Scroll to the top and try again.');
 }
 
-async function captureBase64FromViewShotRef(
+/** Same capture as captureFromViewShotRef, but returns the PNG as a base64 string
+ * instead of writing a temp file — used to feed the raster "print receipt as
+ * image" path (see bluetoothPrintService.printReceipt) without a filesystem
+ * round-trip. Retries once on failure for the same reasons as the tmpfile path. */
+export async function captureReceiptBase64(
   viewShotRef: ReceiptCaptureRef,
 ): Promise<string> {
   await waitForReceiptLayout();
@@ -126,11 +130,24 @@ async function captureBase64FromViewShotRef(
     throw new Error('Receipt is not ready. Wait a moment and try again.');
   }
 
-  return captureRef(node, {
-    format: 'png',
-    quality: 1,
-    result: 'base64',
-  });
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await captureRef(node, {
+        format: 'png',
+        quality: 1,
+        result: 'base64',
+      });
+    } catch (error) {
+      lastError = error;
+      await new Promise<void>(resolve => setTimeout(resolve, 400));
+    }
+  }
+
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+  throw new Error('Could not capture receipt image. Scroll to the top and try again.');
 }
 
 async function getCameraRoll() {
@@ -234,7 +251,7 @@ export async function shareReceiptImageFile(
     });
   } catch {
     try {
-      const base64 = await captureBase64FromViewShotRef(viewShotRef);
+      const base64 = await captureReceiptBase64(viewShotRef);
       const dataUri = `data:image/png;base64,${base64}`;
       await Share.share({
         title: `Receipt ${receiptRef}`,

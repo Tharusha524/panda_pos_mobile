@@ -30,7 +30,6 @@ import type { BankAccount } from '@/services/api/bankService';
 import { refundCardStorage } from '@/services/storage/refundCardStorage';
 import { isInvalidHoldPinError } from '@/services/storage/holdPinStorage';
 import { useSavedHoldPin } from '@/hooks/useSavedHoldPin';
-import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { formatCurrency } from '@/utils/format';
 import { cartLineKey, itemHasBatches } from '@/utils/batchUtils';
 import {
@@ -96,7 +95,6 @@ export const SaleOrderScreen: React.FC = () => {
   const banks: BankAccount[] = [];
   const [bankId, setBankId] = useState<number | string | null>('');
   const [chequeNumber, setChequeNumber] = useState('');
-  const [printing, setPrinting] = useState(false);
   const [originalSaleId, setOriginalSaleId] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [paymentCardLast4, setPaymentCardLast4] = useState('');
@@ -490,31 +488,9 @@ export const SaleOrderScreen: React.FC = () => {
       },
     };
 
-    setPrinting(true);
-    try {
-      if (bluetoothPrintService.isSupported()) {
-        const customerId =
-          activeCustomer && !isWalkInCustomer(activeCustomer) ? activeCustomer.id : null;
-        await bluetoothPrintService.printReceipt(
-          receiptWithCustomerInfo,
-          currency,
-          settings,
-          customerId,
-        );
-      }
-    } catch (e) {
-      showError({
-        title: 'Print',
-        message:
-          e instanceof Error
-            ? e.message
-            : 'Could not print receipt. Set up your printer in Settings → Receipt printer.',
-        variant: 'warning',
-      });
-    } finally {
-      setPrinting(false);
-    }
-
+    // No auto-print here — land on the receipt screen so the cashier sees the
+    // preview first and prints from there (its own Print button), rather than a
+    // receipt firing silently before it's even been reviewed.
     navigation.replace('SaleReceipt', { receipt: receiptWithCustomerInfo });
   };
 
@@ -691,18 +667,16 @@ export const SaleOrderScreen: React.FC = () => {
         showBack
       />
 
-      {pos.submitting || printing || holding ? (
+      {pos.submitting || holding ? (
         <LoadingOverlay
           message={
-            printing
-              ? 'Printing receipt…'
-              : holding
-                ? 'Saving hold order…'
-                : pos.isReturn
-                  ? 'Processing return…'
-                  : pos.activeHoldId
-                    ? 'Completing hold…'
-                    : 'Processing payment…'
+            holding
+              ? 'Saving hold order…'
+              : pos.isReturn
+                ? 'Processing return…'
+                : pos.activeHoldId
+                  ? 'Completing hold…'
+                  : 'Processing payment…'
           }
         />
       ) : null}
@@ -1119,8 +1093,8 @@ export const SaleOrderScreen: React.FC = () => {
           onHold={showHoldFab ? handleHold : undefined}
           onPay={handlePay}
           holdLoading={holding}
-          payLoading={pos.submitting || printing}
-          disabled={pos.submitting || printing || holding || pos.cart.length === 0}
+          payLoading={pos.submitting}
+          disabled={pos.submitting || holding || pos.cart.length === 0}
         />
       </KeyboardAvoidingView>
 
