@@ -42,6 +42,17 @@ export interface ReceiptPrintCustomization {
    * (totals bigger than footnotes) is preserved rather than flattened. */
   receiptBodyTextSizePx: number;
   receiptBodyTextWeight: ReceiptTextWeight;
+  /** Font size (px) + weight for the company details block right under the
+   * company name (address, phone, email, tax ID, registration number) — separate
+   * from the general body text control so this block can be sized/weighted on
+   * its own. */
+  receiptCompanyDetailsSizePx: number;
+  receiptCompanyDetailsWeight: ReceiptTextWeight;
+  /** Thickness (px) of the horizontal divider lines that separate receipt
+   * sections — also always rendered fully solid black (not the original faint
+   * translucent line), since a thin, partly-transparent line is exactly the kind
+   * of pixel that gets lost when the receipt is converted to printer dots. */
+  receiptDividerThicknessPx: number;
 }
 
 export const DEFAULT_RECEIPT_PRINT_CUSTOMIZATION: ReceiptPrintCustomization = {
@@ -64,4 +75,7 @@ export const DEFAULT_RECEIPT_PRINT_CUSTOMIZATION: ReceiptPrintCustomization = {
   receiptCompanyNameWeight: 'bold',
   receiptBodyTextSizePx: 12,
   receiptBodyTextWeight: 'regular',
+  receiptCompanyDetailsSizePx: 12,
+  receiptCompanyDetailsWeight: 'regular',
+  receiptDividerThicknessPx: 1,
 };

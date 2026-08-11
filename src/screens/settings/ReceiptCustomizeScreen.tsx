@@ -545,6 +545,21 @@ export const ReceiptCustomizeScreen: React.FC = () => {
             />
 
             <SizeStepper
+              label="Company details size"
+              value={form.receiptCompanyDetailsSizePx}
+              min={8}
+              max={24}
+              step={1}
+              onChange={v => patch({ receiptCompanyDetailsSizePx: v })}
+            />
+            <ChipRow
+              label="Company details weight"
+              value={form.receiptCompanyDetailsWeight}
+              onChange={id => patch({ receiptCompanyDetailsWeight: id as ReceiptTextWeight })}
+              options={WEIGHT_OPTIONS}
+            />
+
+            <SizeStepper
               label="Body text size"
               value={form.receiptBodyTextSizePx}
               min={8}
@@ -557,6 +572,15 @@ export const ReceiptCustomizeScreen: React.FC = () => {
               value={form.receiptBodyTextWeight}
               onChange={id => patch({ receiptBodyTextWeight: id as ReceiptTextWeight })}
               options={WEIGHT_OPTIONS}
+            />
+
+            <SizeStepper
+              label="Divider line thickness"
+              value={form.receiptDividerThicknessPx}
+              min={1}
+              max={6}
+              step={1}
+              onChange={v => patch({ receiptDividerThicknessPx: v })}
             />
           </Box>
 

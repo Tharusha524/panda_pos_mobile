@@ -102,6 +102,17 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
     fontSize: customization.receiptCompanyNameSizePx,
     fontWeight: WEIGHT_MAP[customization.receiptCompanyNameWeight],
   };
+  // Company details block (address/phone/email/tax ID/reg no) has its own
+  // dedicated size+weight, separate from the general body text control below.
+  const companyDetailsStyle: TextStyle = {
+    fontSize: customization.receiptCompanyDetailsSizePx,
+    ...(customization.receiptCompanyDetailsWeight === 'regular'
+      ? null
+      : { fontWeight: WEIGHT_MAP[customization.receiptCompanyDetailsWeight] }),
+  };
+  // Both divider styles below are overridden to this thickness and rendered fully
+  // solid black — see receiptDividerThicknessPx doc comment.
+  const dividerOverride = { height: customization.receiptDividerThicknessPx };
 
   const now = new Date();
   const printedAt = `${now.toLocaleDateString()} ${now.toLocaleTimeString([], {
@@ -148,17 +159,23 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
       ) : null}
 
       <Text style={[styles.companyName, companyNameStyle]}>{companyName}</Text>
-      {address ? <Text style={[styles.mutedCenter, bodyText(12)]}>{address}</Text> : null}
-      {phone ? <Text style={[styles.mutedCenter, bodyText(12)]}>Tel: {phone}</Text> : null}
-      {email ? <Text style={[styles.mutedCenter, bodyText(12)]}>{email}</Text> : null}
+      {address ? (
+        <Text style={[styles.mutedCenter, companyDetailsStyle]}>{address}</Text>
+      ) : null}
+      {phone ? (
+        <Text style={[styles.mutedCenter, companyDetailsStyle]}>Tel: {phone}</Text>
+      ) : null}
+      {email ? (
+        <Text style={[styles.mutedCenter, companyDetailsStyle]}>{email}</Text>
+      ) : null}
       {taxId ? (
-        <Text style={[styles.mutedCenter, bodyText(12)]}>Tax ID: {taxId}</Text>
+        <Text style={[styles.mutedCenter, companyDetailsStyle]}>Tax ID: {taxId}</Text>
       ) : null}
       {regNo ? (
-        <Text style={[styles.mutedCenter, bodyText(12)]}>Reg: {regNo}</Text>
+        <Text style={[styles.mutedCenter, companyDetailsStyle]}>Reg: {regNo}</Text>
       ) : null}
 
-      <View style={styles.divider} />
+      <View style={[styles.divider, dividerOverride]} />
       <Text
         style={[
           styles.invoiceTitle,
@@ -193,7 +210,7 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
 
       {customerInfoRows.length > 0 ? (
         <>
-          <View style={styles.dividerThin} />
+          <View style={[styles.dividerThin, dividerOverride]} />
           <Text style={[styles.partyTitle, bodyText(11)]}>Customer Information</Text>
           <View style={styles.partyBlock}>
             {customerInfoRows.map(row => (
@@ -213,7 +230,7 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
         <Text style={[styles.th, styles.colQty, bodyText(11)]}>Qty</Text>
         <Text style={[styles.th, styles.colAmt, bodyText(11)]}>Amount</Text>
       </View>
-      <View style={styles.dividerThin} />
+      <View style={[styles.dividerThin, dividerOverride]} />
 
       {sale.lines.map((line, idx) => {
         const uom = resolveLineUom(line.uom);
@@ -238,7 +255,7 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
         );
       })}
 
-      <View style={styles.divider} />
+      <View style={[styles.divider, dividerOverride]} />
 
       <TotalRow
         label="Subtotal"
@@ -284,7 +301,7 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
         </>
       ) : null}
 
-      <View style={styles.divider} />
+      <View style={[styles.divider, dividerOverride]} />
       <Text style={[styles.thankYou, bodyText(13)]}>Thank you for your business!</Text>
       <Text style={[styles.softwareLine, bodyText(11)]}>{RECEIPT_SOFTWARE_PROVIDER}</Text>
       <Text style={[styles.softwareLine, bodyText(11)]}>{RECEIPT_SOFTWARE_WEBSITE}</Text>
@@ -345,7 +362,7 @@ const styles = StyleSheet.create({
   mutedCenter: {
     fontSize: 12,
     textAlign: 'center',
-    color: colors.textSecondary,
+    color: colors.text,
     marginTop: 2,
   },
   invoiceTitle: {
@@ -365,11 +382,10 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: colors.text,
     marginVertical: 12,
-    opacity: 0.2,
   },
   dividerThin: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.border,
+    backgroundColor: colors.text,
     marginBottom: 4,
   },
   metaBlock: {
@@ -378,7 +394,7 @@ const styles = StyleSheet.create({
   },
   metaLabel: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: colors.text,
   },
   metaValue: {
     fontSize: 12,
@@ -390,7 +406,7 @@ const styles = StyleSheet.create({
   partyTitle: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textMuted,
+    color: colors.text,
     textTransform: 'uppercase',
     letterSpacing: 0.6,
     marginTop: 2,
@@ -406,7 +422,7 @@ const styles = StyleSheet.create({
   th: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textMuted,
+    color: colors.text,
     textTransform: 'uppercase',
   },
   colItem: { flex: 1 },
@@ -426,7 +442,7 @@ const styles = StyleSheet.create({
   },
   lineSub: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: colors.text,
     marginTop: 2,
   },
   lineAmt: {
@@ -438,12 +454,12 @@ const styles = StyleSheet.create({
   lineQty: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textSecondary,
+    color: colors.text,
     textAlign: 'right',
   },
   totalLabel: {
     fontSize: 13,
-    color: colors.textSecondary,
+    color: colors.text,
   },
   totalValue: {
     fontSize: 13,
@@ -479,14 +495,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textSecondary,
+    color: colors.text,
     marginTop: 8,
     letterSpacing: 0.4,
   },
   footerNote: {
     textAlign: 'center',
     fontSize: 10,
-    color: colors.textMuted,
+    color: colors.text,
     marginTop: 6,
   },
   barcode: {
