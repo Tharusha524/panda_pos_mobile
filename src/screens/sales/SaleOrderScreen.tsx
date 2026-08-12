@@ -491,7 +491,10 @@ export const SaleOrderScreen: React.FC = () => {
     // No auto-print here — land on the receipt screen so the cashier sees the
     // preview first and prints from there (its own Print button), rather than a
     // receipt firing silently before it's even been reviewed.
-    navigation.replace('SaleReceipt', { receipt: receiptWithCustomerInfo });
+    navigation.replace('SaleReceipt', {
+      receipt: receiptWithCustomerInfo,
+      customerId: activeCustomer?.id || null,
+    });
   };
 
   const handlePay = async () => {

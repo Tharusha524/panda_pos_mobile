@@ -14,7 +14,7 @@ export type HomeStackParamList = {
   CustomerForm: { customerId?: number; selectOnSave?: boolean };
   CustomerReceivePayment: { customerId: number };
   CustomerHistory: { customerId: number };
-  CustomerSaleReceipt: { receipt: SaleReceiptPayload };
+  CustomerSaleReceipt: { receipt: SaleReceiptPayload; customerId?: number | null };
   ExpensesList: undefined;
   ExpenseForm: { expenseId?: number };
 };
@@ -38,7 +38,7 @@ export type AppStackParamList = {
 export type SalesStackParamList = {
   SalesPOS: undefined;
   SaleOrder: undefined;
-  SaleReceipt: { receipt: SaleReceiptPayload };
+  SaleReceipt: { receipt: SaleReceiptPayload; customerId?: number | null };
   HoldOrders: undefined;
   CustomerForm: { customerId?: number; selectOnSave?: boolean };
 };

@@ -15,9 +15,11 @@ import { usePosSettings } from '@/context/PosSettingsContext';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { navigateToPrinterSetup } from '@/navigation/navigationRef';
 import {
+  captureReceiptBase64,
   downloadReceiptAsImage,
   shareReceiptImageFile,
 } from '@/utils/receiptImageShare';
+import { getReceiptPrintCustomization } from '@/utils/receiptPrintCustomization';
 import type { ProductsStackParamList } from '@/navigation/types';
 
 type Route = RouteProp<ProductsStackParamList, 'PurchaseReceipt'>;
@@ -48,7 +50,23 @@ export const PurchaseReceiptScreen: React.FC = () => {
   const handlePrint = async () => {
     setPrinting(true);
     try {
-      await bluetoothPrintService.printReceipt(params.receipt, currency, settings);
+      let capturedImageBase64: string | undefined;
+      try {
+        const customization = await getReceiptPrintCustomization(settings);
+        if (customization.printAsImage) {
+          capturedImageBase64 = await captureReceiptBase64(receiptShotRef);
+        }
+      } catch {
+        // Couldn't read the setting or capture the preview — fall back to the
+        // normal text receipt below instead of blocking the print entirely.
+      }
+      await bluetoothPrintService.printReceipt(
+        params.receipt,
+        currency,
+        settings,
+        undefined,
+        capturedImageBase64,
+      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Print failed';
       if (isPrinterSetupError(msg)) {

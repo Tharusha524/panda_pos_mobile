@@ -7,14 +7,18 @@ import {
 } from '@/components/common/ActivityDataTable';
 import { formatCurrency, resolveCurrencyCode, parseBackendTimestamp } from '@/utils/format';
 import { colors } from '@/theme';
+import { filterReportColumns } from '@/constants/reportColumnFilters';
 import type { BackendReportData } from '@/types/backendReports';
 import type { PosMobileSettings } from '@/types/settings';
-import type { SystemReportHeader } from '@/types/reports';
+import type { SystemReportHeader, SystemReportType } from '@/types/reports';
 
 interface BackendReportViewProps {
   report: BackendReportData;
   header: SystemReportHeader;
   settings?: PosMobileSettings | null;
+  /** Which catalog report this data came from — used to trim wide reports down
+   * to their highest-value columns (see reportColumnFilters). */
+  reportType: SystemReportType;
 }
 
 const formatCell = (value: unknown, currency: string): string => {
@@ -40,6 +44,7 @@ export const BackendReportView: React.FC<BackendReportViewProps> = ({
   report,
   header,
   settings,
+  reportType,
 }) => {
   const currency = resolveCurrencyCode(settings?.company?.currency);
   const now = new Date();
@@ -48,7 +53,8 @@ export const BackendReportView: React.FC<BackendReportViewProps> = ({
     minute: '2-digit',
   })}`;
 
-  const tableColumns = report.columns.map(col => ({
+  const visibleColumns = filterReportColumns(reportType, report.columns);
+  const tableColumns = visibleColumns.map(col => ({
     key: col.key,
     label: col.label,
     flex: 1,
@@ -97,7 +103,7 @@ export const BackendReportView: React.FC<BackendReportViewProps> = ({
   };
 
   const renderTable = () => {
-    if (!report.columns.length) {
+    if (!visibleColumns.length) {
       return null;
     }
 
@@ -110,7 +116,7 @@ export const BackendReportView: React.FC<BackendReportViewProps> = ({
             key={`row-${idx}`}
             columns={tableColumns}
             isLast={idx === report.rows.length - 1}
-            cells={report.columns.map(col => (
+            cells={visibleColumns.map(col => (
               <Text key={col.key} style={styles.tableCell} numberOfLines={2}>
                 {formatCell(row[col.key], currency)}
               </Text>

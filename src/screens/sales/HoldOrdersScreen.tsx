@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import { Text } from 'react-native-paper';
+import ViewShot, { type ViewShotRef } from 'react-native-view-shot';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { PauseCircle, Trash2 } from 'lucide-react-native';
@@ -16,6 +17,7 @@ import { AppHeader } from '@/components/common/AppHeader';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import { LoadingOverlay } from '@/components/common/LoadingOverlay';
 import { PrimaryButton } from '@/components/buttons/PrimaryButton';
+import { SaleReceiptView } from '@/components/sales/SaleReceiptView';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { useDataRefreshNotify } from '@/context/DataRefreshContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
@@ -23,11 +25,14 @@ import { usePosSaleContext } from '@/context/PosSaleContext';
 import { useSavedHoldPin } from '@/hooks/useSavedHoldPin';
 import { isInvalidHoldPinError } from '@/services/storage/holdPinStorage';
 import { salesService } from '@/services/api/salesService';
+import { customerService } from '@/services/api/customerService';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { navigateToPrinterSetup } from '@/navigation/navigationRef';
 import type { SaleRecord } from '@/types/sales';
 import type { SaleReceiptPayload } from '@/types/sales';
 import { formatCurrency } from '@/utils/format';
+import { captureReceiptBase64 } from '@/utils/receiptImageShare';
+import { getReceiptPrintCustomization } from '@/utils/receiptPrintCustomization';
 import { appInputStyle, colors, shadows, TAB_BAR_SCROLL_PADDING, typography } from '@/theme';
 import type { SalesStackParamList } from '@/navigation/types';
 
@@ -72,6 +77,11 @@ export const HoldOrdersScreen: React.FC = () => {
   const [pinModalBulk, setPinModalBulk] = useState(false);
   const [holdPinDraft, setHoldPinDraft] = useState('');
   const { savedHoldPin, saveHoldPin, clearHoldPin } = useSavedHoldPin();
+  const [previewReceipt, setPreviewReceipt] = useState<SaleReceiptPayload | null>(null);
+  const [previewCustomerBalance, setPreviewCustomerBalance] = useState<number | null>(
+    null,
+  );
+  const previewShotRef = useRef<ViewShotRef>(null);
 
   const allowDeleteHold = useMemo(() => {
     const fromList = orderSettings.allow_deletion_of_hold_orders;
@@ -132,11 +142,31 @@ export const HoldOrdersScreen: React.FC = () => {
         promptPrinterSetup('Configure a receipt printer in Settings → Receipt printer.');
         return;
       }
+      let capturedImageBase64: string | undefined;
+      try {
+        const customization = await getReceiptPrintCustomization(settings);
+        if (customization.printAsImage) {
+          if (order.customer_id) {
+            setPreviewCustomerBalance(
+              await customerService
+                .get(order.customer_id)
+                .then(c => c.net_balance ?? null)
+                .catch(() => null),
+            );
+          }
+          setPreviewReceipt(receipt);
+          capturedImageBase64 = await captureReceiptBase64(previewShotRef);
+        }
+      } catch {
+        // Couldn't read the setting or capture the preview — fall back to the
+        // normal text receipt below instead of blocking the print entirely.
+      }
       await bluetoothPrintService.printReceipt(
         receipt,
         currency,
         settings,
         order.customer_id,
+        capturedImageBase64,
       );
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Print failed';
@@ -147,6 +177,8 @@ export const HoldOrdersScreen: React.FC = () => {
       }
     } finally {
       setPrintingId(null);
+      setPreviewReceipt(null);
+      setPreviewCustomerBalance(null);
     }
   };
 
@@ -503,11 +535,32 @@ export const HoldOrdersScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
+
+      {previewReceipt ? (
+        <View style={styles.offscreenCapture} pointerEvents="none">
+          <ViewShot
+            ref={previewShotRef}
+            options={{ format: 'png', quality: 1, result: 'tmpfile' }}
+            style={{ backgroundColor: '#fff' }}>
+            <SaleReceiptView
+              receipt={previewReceipt}
+              settings={settings}
+              customerOutstandingBalance={previewCustomerBalance}
+            />
+          </ViewShot>
+        </View>
+      ) : null}
     </ScreenContainer>
   );
 };
 
 const styles = StyleSheet.create({
+  offscreenCapture: {
+    position: 'absolute',
+    top: 0,
+    left: -9999,
+    width: 400,
+  },
   scroll: { flex: 1 },
   content: {
     padding: 16,

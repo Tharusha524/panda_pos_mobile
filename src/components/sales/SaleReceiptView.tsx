@@ -28,6 +28,10 @@ interface SaleReceiptViewProps {
    * by the Receipt layout settings screen so its live preview reflects in-progress,
    * not-yet-saved changes instantly instead of lagging a save behind. */
   customizationOverride?: ReceiptPrintCustomization;
+  /** Customer's total amount owed overall (across all their past sales) — distinct
+   * from this bill's own total above. Only shown when the caller resolved and
+   * supplied a real customer's current balance; omit for walk-in sales. */
+  customerOutstandingBalance?: number | null;
 }
 
 const WEIGHT_MAP: Record<ReceiptTextWeight, TextStyle['fontWeight']> = {
@@ -43,6 +47,7 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
   receipt,
   settings,
   customizationOverride,
+  customerOutstandingBalance,
 }) => {
   const sale = receipt.sale;
   const header = receipt.header as Record<string, string | undefined>;
@@ -142,7 +147,6 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
     { label: 'Customer ID', value: sale.customer_code },
     { label: 'Phone', value: sale.customer_contact_no },
     { label: 'Email', value: sale.customer_email },
-    { label: 'Location', value: sale.customer_location },
     { label: 'Route', value: sale.customer_route },
     { label: 'Address', value: sale.customer_address },
     { label: 'Tax ID', value: sale.customer_tax_id },
@@ -299,6 +303,13 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
             />
           ) : null}
         </>
+      ) : null}
+      {customerOutstandingBalance != null ? (
+        <TotalRow
+          label="Outstanding balance"
+          value={formatCurrency(customerOutstandingBalance, currency)}
+          textStyle={bodyText(13)}
+        />
       ) : null}
 
       <View style={[styles.divider, dividerOverride]} />

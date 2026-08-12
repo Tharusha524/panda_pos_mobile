@@ -18,7 +18,7 @@ import {
 import type { TodayTablesPayload } from '@/types/dashboard';
 import type { SystemReportPayload } from '@/types/reports';
 import type { BackendReportData } from '@/types/backendReports';
-import type { SystemReportHeader } from '@/types/reports';
+import type { SystemReportHeader, SystemReportType } from '@/types/reports';
 import { receiptPrintStorage } from '@/services/storage/receiptPrintStorage';
 import { receiptTitleImageStorage } from '@/services/storage/receiptTitleImageStorage';
 import { tokenStorage } from '@/services/storage/tokenStorage';
@@ -831,6 +831,10 @@ export const bluetoothPrintService = {
     report: SystemReportPayload,
     currency?: string,
     settings?: PosMobileSettings | null,
+    /** PNG (base64) of the on-screen report preview — see
+     * receiptImageShare.captureReceiptBase64. Only used when the "print receipt as
+     * image" setting is on; ignored (and safe to omit) otherwise. */
+    capturedImageBase64?: string,
   ): Promise<void> {
     if (!(await this.isConfigured())) {
       throw new Error(
@@ -841,9 +845,25 @@ export const bluetoothPrintService = {
     const saved = await resolveSavedPrinter();
     const localCustomization = await receiptPrintStorage.get();
     const customization = mergeReceiptPrintSettings(settings, localCustomization);
-    const logo = await resolveReceiptLogo(null, settings);
 
     await connectAndPrepare(saved.type, saved.address, saved.profile);
+
+    if (customization.printAsImage && capturedImageBase64) {
+      try {
+        const behavior = getPrinterProfileBehavior(await resolvePrinterProfile(saved.profile));
+        await printFullReceiptImage(
+          saved.type,
+          capturedImageBase64,
+          customization.paperWidth,
+          behavior,
+        );
+        return;
+      } catch {
+        // Raster print failed — fall through to the normal text-based print below.
+      }
+    }
+
+    const logo = await resolveReceiptLogo(null, settings);
 
     if (customization.showLogo && logo) {
       try {
@@ -866,6 +886,13 @@ export const bluetoothPrintService = {
     header: SystemReportHeader,
     currency?: string,
     settings?: PosMobileSettings | null,
+    /** PNG (base64) of the on-screen report preview — see
+     * receiptImageShare.captureReceiptBase64. Only used when the "print receipt as
+     * image" setting is on; ignored (and safe to omit) otherwise. */
+    capturedImageBase64?: string,
+    /** Which catalog report this is — lets the text fallback below trim wide
+     * reports down to their highest-value columns (see reportColumnFilters). */
+    reportType?: SystemReportType,
   ): Promise<void> {
     if (!(await this.isConfigured())) {
       throw new Error(
@@ -876,9 +903,25 @@ export const bluetoothPrintService = {
     const saved = await resolveSavedPrinter();
     const localCustomization = await receiptPrintStorage.get();
     const customization = mergeReceiptPrintSettings(settings, localCustomization);
-    const logo = await resolveReceiptLogo(null, settings);
 
     await connectAndPrepare(saved.type, saved.address, saved.profile);
+
+    if (customization.printAsImage && capturedImageBase64) {
+      try {
+        const behavior = getPrinterProfileBehavior(await resolvePrinterProfile(saved.profile));
+        await printFullReceiptImage(
+          saved.type,
+          capturedImageBase64,
+          customization.paperWidth,
+          behavior,
+        );
+        return;
+      } catch {
+        // Raster print failed — fall through to the normal text-based print below.
+      }
+    }
+
+    const logo = await resolveReceiptLogo(null, settings);
 
     if (customization.showLogo && logo) {
       try {
@@ -892,6 +935,7 @@ export const bluetoothPrintService = {
       currency,
       customization,
       settings,
+      reportType,
     });
     await sendRawText(saved.type, text, saved.profile);
   },
