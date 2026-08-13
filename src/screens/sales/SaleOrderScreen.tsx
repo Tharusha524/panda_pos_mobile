@@ -88,8 +88,6 @@ export const SaleOrderScreen: React.FC = () => {
   const { error: posError, setError: setPosError } = pos;
 
   const [customerModal, setCustomerModal] = useState(false);
-  const [routeModal, setRouteModal] = useState(false);
-  const [routeFilter, setRouteFilter] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState(pos.paymentMethod);
   const [amountReceived, setAmountReceived] = useState('');
   const banks: BankAccount[] = [];
@@ -331,21 +329,12 @@ export const SaleOrderScreen: React.FC = () => {
     [pos.items],
   );
 
-  const routeOptions = useMemo(() => {
-    const seen = new Set<string>();
-    for (const c of pos.customers) {
-      const route = c.route?.trim();
-      if (route) {
-        seen.add(route);
-      }
-    }
-    return Array.from(seen).sort((a, b) => a.localeCompare(b));
-  }, [pos.customers]);
-
   const customerOptions = [
     { id: 'walk-in', label: 'Walk-in Customer', subtitle: 'Default' },
     ...pos.customers
-      .filter(c => !routeFilter || c.route === routeFilter)
+      // Route is locked for this sale (picked on the start-sale gate) — keep
+      // the customer list scoped to it, same as before.
+      .filter(c => !pos.route || c.route === pos.route)
       .map(c => {
         const balance =
           (c.net_balance ?? 0) > 0
@@ -1123,9 +1112,8 @@ export const SaleOrderScreen: React.FC = () => {
           navigation.navigate('CustomerForm', { selectOnSave: true });
         }}
         headerExtra={
-          routeOptions.length > 0 ? (
-            <Pressable
-              onPress={() => setRouteModal(true)}
+          pos.route ? (
+            <Box
               flexDirection="row"
               alignItems="center"
               justifyContent="space-between"
@@ -1138,25 +1126,15 @@ export const SaleOrderScreen: React.FC = () => {
                   Route
                 </Text>
                 <Text fontWeight="$semibold" color={colors.text}>
-                  {routeFilter ?? 'All routes'}
+                  {pos.route}
                 </Text>
               </VStack>
-              <ChevronRight size={16} color={colors.primaryLight} />
-            </Pressable>
+              <Text size="xs" color={colors.textMuted}>
+                Locked for this sale
+              </Text>
+            </Box>
           ) : undefined
         }
-      />
-
-      <SelectionModal
-        visible={routeModal}
-        title="Filter by route"
-        options={[
-          { id: '__all__', label: 'All routes' },
-          ...routeOptions.map(r => ({ id: r, label: r })),
-        ]}
-        onSelect={opt => setRouteFilter(opt.id === '__all__' ? null : opt.id)}
-        onClose={() => setRouteModal(false)}
-        emptyMessage="No routes"
       />
     </ScreenContainer>
   );

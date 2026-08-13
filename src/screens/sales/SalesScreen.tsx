@@ -2,7 +2,7 @@ import React, { useEffect, useMemo } from 'react';
 import { Keyboard, Pressable, StyleSheet, View } from 'react-native';
 import { Text } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { PauseCircle } from 'lucide-react-native';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
@@ -13,6 +13,7 @@ import { ReturnSalePicker } from '@/components/sales/ReturnSalePicker';
 import { PosProductGrid } from '@/components/sales/PosProductGrid';
 import { PosBatchSelectModal } from '@/components/sales/PosBatchSelectModal';
 import { PosDockCartBar } from '@/components/sales/PosDockCartBar';
+import { StartSaleGateModal } from '@/components/sales/StartSaleGateModal';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSaleContext } from '@/context/PosSaleContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
@@ -27,6 +28,7 @@ type Nav = NativeStackNavigationProp<SalesStackParamList, 'SalesPOS'>;
 
 export const SalesScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
+  const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const { showError } = useErrorDialog();
   const { currency } = usePosSettings();
@@ -52,6 +54,18 @@ export const SalesScreen: React.FC = () => {
 
   const canBrowseItems =
     !pos.isReturn || pos.returnSourceSale != null || pos.returnWithoutBill;
+
+  // Force route + customer selection before a brand-new sale can be started.
+  // Gated on isFocused too — the Sales tab mounts in the background as soon as
+  // the app starts (it's the tab navigator's initial route and tabs stay
+  // mounted when you switch away), so without this the popup could fire
+  // silently before the user ever taps "New Sale".
+  const showStartSaleGate =
+    isFocused &&
+    !pos.isReturn &&
+    !pos.loading &&
+    pos.cart.length === 0 &&
+    !pos.routeLocked;
 
   const openOrder = () => {
     if (
@@ -229,6 +243,19 @@ export const SalesScreen: React.FC = () => {
         onClose={pos.closeBatchPicker}
         onSelectMainProduct={pos.addMainFromBatchPicker}
         onSelectBatch={pos.addBatchFromPicker}
+      />
+
+      <StartSaleGateModal
+        visible={showStartSaleGate}
+        routeOptions={pos.routeOptions}
+        route={pos.route}
+        onSelectRoute={pos.selectRoute}
+        customers={pos.customers}
+        customer={pos.customer}
+        onSelectCustomer={pos.selectCustomer}
+        onNewCustomer={() => navigation.navigate('CustomerForm', { selectOnSave: true })}
+        onConfirm={pos.lockRouteSelection}
+        currency={currency}
       />
     </ScreenContainer>
   );

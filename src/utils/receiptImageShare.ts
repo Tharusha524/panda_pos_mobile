@@ -15,6 +15,7 @@ import { formatPrintAmount, resolveCurrencyCode } from '@/utils/format';
 import { formatReceiptQtyDetail, resolveLineUom } from '@/utils/uom';
 import type { SaleReceiptPayload } from '@/types/sales';
 import type { PurchaseReceiptPayload } from '@/types/inventory';
+import type { PaymentReceiptPayload } from '@/types/customers';
 
 export type ReceiptCaptureRef = RefObject<ViewShotRef | null>;
 
@@ -187,11 +188,14 @@ async function saveUriToGallery(uri: string, salesId: string): Promise<string> {
   }
 }
 
-type ShareableReceipt = SaleReceiptPayload | PurchaseReceiptPayload;
+type ShareableReceipt = SaleReceiptPayload | PurchaseReceiptPayload | PaymentReceiptPayload;
 
 function getReceiptReference(receipt: ShareableReceipt): string {
   if ('purchase' in receipt) {
     return receipt.purchase.invoice_id;
+  }
+  if ('result' in receipt) {
+    return `Payment-${receipt.result.customer.customer_name}`;
   }
   return receipt.sale.sales_id;
 }

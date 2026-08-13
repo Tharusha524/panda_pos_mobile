@@ -12,14 +12,16 @@ interface PivotRow {
   customer: string;
   paymentMethod: string;
   total: number;
-  perItem: Record<string, { qty: number; amount: number }>;
+  /** unitPrice is the per-unit price of the product on this sale, not a summed amount. */
+  perItem: Record<string, { qty: number; unitPrice: number }>;
 }
 
 interface PivotResult {
   columns: PivotItemColumn[];
   rows: PivotRow[];
   totals: {
-    perItem: Record<string, { qty: number; amount: number }>;
+    /** Only qty is meaningful to total across rows — unit price isn't summable. */
+    perItem: Record<string, { qty: number }>;
     grandTotal: number;
   };
 }
@@ -33,9 +35,9 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
 };
 
 /** Pivots a day's sales into: one row per sale (as printed on that bill), one
- * Pcs/Total column pair per distinct item sold that day. Return transactions
- * are excluded — this mirrors the paper "Daily Sale Report" sheet, a
- * positive-sales view only. */
+ * Pcs/Unit Price column pair per distinct item sold that day. Return
+ * transactions are excluded — this mirrors the paper "Daily Sale Report"
+ * sheet, a positive-sales view only. */
 export function buildDailySalesPivot(sales: SalesSummarySale[]): PivotResult {
   const saleRows = sales.filter(s => s.transaction_label !== 'Return');
 
@@ -43,17 +45,19 @@ export function buildDailySalesPivot(sales: SalesSummarySale[]): PivotResult {
   const seenColumns = new Set<string>();
 
   const rows: PivotRow[] = saleRows.map(sale => {
-    const perItem: Record<string, { qty: number; amount: number }> = {};
+    const perItem: Record<string, { qty: number; unitPrice: number }> = {};
     for (const item of sale.items) {
       const key = item.description?.trim() || item.item_number?.trim() || 'Item';
       if (!seenColumns.has(key)) {
         seenColumns.add(key);
         columns.push({ key });
       }
-      const existing = perItem[key] ?? { qty: 0, amount: 0 };
+      const existing = perItem[key] ?? { qty: 0, unitPrice: 0 };
       perItem[key] = {
         qty: existing.qty + item.qty,
-        amount: existing.amount + item.amount,
+        // Same item can appear on more than one line in a sale (e.g. different
+        // batches) — last price wins for display rather than summing prices.
+        unitPrice: item.unit_price,
       };
     }
     return {
@@ -65,11 +69,11 @@ export function buildDailySalesPivot(sales: SalesSummarySale[]): PivotResult {
   });
 
   const totals = {
-    perItem: {} as Record<string, { qty: number; amount: number }>,
+    perItem: {} as Record<string, { qty: number }>,
     grandTotal: 0,
   };
   for (const col of columns) {
-    totals.perItem[col.key] = { qty: 0, amount: 0 };
+    totals.perItem[col.key] = { qty: 0 };
   }
   for (const row of rows) {
     totals.grandTotal += row.total;
@@ -77,7 +81,6 @@ export function buildDailySalesPivot(sales: SalesSummarySale[]): PivotResult {
       const cell = row.perItem[col.key];
       if (cell) {
         totals.perItem[col.key].qty += cell.qty;
-        totals.perItem[col.key].amount += cell.amount;
       }
     }
   }
@@ -115,12 +118,12 @@ export async function buildDailySalesWorkbookBase64(
 
   ws.addRow([]);
 
-  // Header rows (Name | <item> ... | Payment Method | Total, then Pcs/Total sub-labels)
+  // Header rows (Name | <item> ... | Payment Method | Total, then Pcs/Unit Price sub-labels)
   const headerRow1: (string | number)[] = ['Name'];
   const headerRow2: (string | number)[] = [''];
   for (const col of columns) {
     headerRow1.push(col.key, '');
-    headerRow2.push('Pcs', 'Total');
+    headerRow2.push('Pcs', 'Unit Price');
   }
   headerRow1.push('Payment Method', 'Total');
   headerRow2.push('', '');
@@ -151,7 +154,7 @@ export async function buildDailySalesWorkbookBase64(
     const line: (string | number)[] = [row.customer];
     for (const col of columns) {
       const cell = row.perItem[col.key];
-      line.push(cell ? cell.qty : '', cell ? cell.amount : '');
+      line.push(cell ? cell.qty : '', cell ? cell.unitPrice : '');
     }
     line.push(row.paymentMethod, row.total);
     ws.addRow(line);
@@ -161,7 +164,8 @@ export async function buildDailySalesWorkbookBase64(
   const totalLine: (string | number)[] = ['Total'];
   for (const col of columns) {
     const t = totals.perItem[col.key];
-    totalLine.push(t.qty, t.amount);
+    // Unit price isn't summable across sales — leave that side of the total row blank.
+    totalLine.push(t.qty, '');
   }
   totalLine.push('', totals.grandTotal);
   const totalRow = ws.addRow(totalLine);

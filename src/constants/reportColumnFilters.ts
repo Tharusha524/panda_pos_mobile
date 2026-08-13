@@ -10,9 +10,9 @@ import type { ReportColumn } from '@/types/backendReports';
  * every column the backend sends is still shown.
  */
 const REPORT_COLUMN_ALLOWLIST: Partial<Record<SystemReportType, string[]>> = {
-  // Sales report (backend key "sales-details"): Customer, Payment method,
-  // Total (net amount), Sale ID — dropping Date, Branch, Sub Total, Discount.
-  sales_report: ['customer', 'payment_method', 'net_amount', 'sales_id'],
+  // Sales report (backend key "sales-details"): Sale ID, Customer, Payment
+  // method, Total (net amount) — dropping Date, Branch, Sub Total, Discount.
+  sales_report: ['sales_id', 'customer', 'payment_method', 'net_amount'],
   // Customer report (backend key "customer-list"): Name, Route/Branch,
   // Balance, Phone — dropping Code, Email.
   customer_report: ['name', 'location', 'balance', 'phone'],

@@ -5,6 +5,7 @@ import { customerService } from '@/services/api/customerService';
 import { inventoryService } from '@/services/api/inventoryService';
 import { salesService } from '@/services/api/salesService';
 import { offerService } from '@/services/api/offerService';
+import { lastRouteStorage } from '@/services/storage/lastRouteStorage';
 import type { ApplicableOffer, OfferPreviewResult } from '@/types/offers';
 import {
   findBestAutoOffer,
@@ -88,6 +89,8 @@ export const usePosSale = () => {
   const [location, setLocation] = useState('');
   const [customer, setCustomer] = useState<CustomerSummary | null>(WALK_IN);
   const [customers, setCustomers] = useState<CustomerSummary[]>([]);
+  const [route, setRouteState] = useState<string | null>(null);
+  const [routeLocked, setRouteLocked] = useState(false);
   const [categories, setCategories] = useState<ItemCategory[]>([]);
   const [categoryId, setCategoryId] = useState<number | null>(null);
   const [subCategoryId, setSubCategoryId] = useState<number | 'all'>('all');
@@ -292,6 +295,45 @@ export const usePosSale = () => {
   useEffect(() => {
     refreshContext();
   }, [refreshContext]);
+
+  // Pre-fill the route gate with whichever route was picked last on this device.
+  useEffect(() => {
+    let active = true;
+    lastRouteStorage.get().then(saved => {
+      if (active && saved) {
+        setRouteState(saved);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const routeOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const c of customers) {
+      const r = c.route?.trim();
+      if (r) {
+        seen.add(r);
+      }
+    }
+    return Array.from(seen).sort((a, b) => a.localeCompare(b));
+  }, [customers]);
+
+  const selectRoute = useCallback(
+    (r: string | null) => {
+      if (routeLocked) {
+        return;
+      }
+      setRouteState(r);
+    },
+    [routeLocked],
+  );
+
+  const lockRouteSelection = useCallback(() => {
+    setRouteLocked(true);
+    void lastRouteStorage.save(route);
+  }, [route]);
 
   const syncPosData = useCallback(
     async (silent: boolean) => {
@@ -583,11 +625,8 @@ export const usePosSale = () => {
   const addToCart = useCallback((item: InventoryItem, qty = 1, batch?: ItemBatch | null) => {
     const batchId = batch?.id ?? null;
     setCart(prev => {
-      if (prev.length === 0 && !isReturn) {
-        // Starting a brand-new sale — don't carry over a customer left
-        // selected from a previous, unrelated sale.
-        setCustomer(WALK_IN);
-      }
+      // Route/customer for a brand-new sale are now decided up front by the
+      // start-sale gate (see routeLocked) — don't clobber that pick here.
       const existing = prev.find(
         line =>
           line.item_id === item.id && (line.item_batch_id ?? null) === batchId,
@@ -1497,6 +1536,8 @@ export const usePosSale = () => {
         setReturnWithoutBill(false);
         setActiveHoldId(sale.id);
         setActiveHoldSalesId(sale.sales_id);
+        // Resuming a held sale, not starting a new one — skip the gate.
+        setRouteLocked(true);
         setOrderDiscountType('amount');
         setOrderDiscountInput(sale.discount ?? 0);
         setCart(
@@ -1647,6 +1688,7 @@ export const usePosSale = () => {
 
         setCart([]);
         setCustomer(WALK_IN);
+        setRouteLocked(false);
         resetDiscount();
         clearHoldSession();
         await refreshContext();
@@ -1855,6 +1897,7 @@ export const usePosSale = () => {
 
       setCart([]);
       setCustomer(WALK_IN);
+      setRouteLocked(false);
       resetDiscount();
       clearHoldSession();
       setReturnSourceSale(null);
@@ -2045,6 +2088,10 @@ export const usePosSale = () => {
     setSearchQuery('');
     setError(null);
     clearOffer();
+    if (mode === 'sale') {
+      // Fresh cart in sale mode — show the route/customer gate again.
+      setRouteLocked(false);
+    }
   }, [clearOffer]);
 
   const refreshProducts = useCallback(async () => {
@@ -2065,6 +2112,11 @@ export const usePosSale = () => {
     customer,
     customers,
     selectCustomer,
+    route,
+    routeLocked,
+    selectRoute,
+    lockRouteSelection,
+    routeOptions,
     categories,
     categoryId,
     setCategoryId,

@@ -30,6 +30,13 @@ export interface ReceivePaymentResult {
   payment_method: string;
 }
 
+/** Passed to the payment receipt review screen — same payment result the "old
+ * type" text receipt printed from, just routed through the image-receipt preview. */
+export interface PaymentReceiptPayload {
+  result: ReceivePaymentResult;
+  notes: string | null;
+}
+
 export interface CustomerPayload {
   customer_code?: string;
   first_name: string;

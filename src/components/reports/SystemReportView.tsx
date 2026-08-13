@@ -1,6 +1,8 @@
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Image, StyleSheet, View, type TextStyle, type ViewStyle } from 'react-native';
 import { HStack, Text, VStack } from '@gluestack-ui/themed';
+import { useReceiptLogoUri } from '@/hooks/useReceiptLogoUri';
+import { useReceiptStyleScale } from '@/hooks/useReceiptStyleScale';
 import { formatCurrency, resolveCurrencyCode, parseBackendTimestamp } from '@/utils/format';
 import { colors } from '@/theme';
 import type { SystemReportPayload } from '@/types/reports';
@@ -12,23 +14,42 @@ interface SystemReportViewProps {
   settings?: PosMobileSettings | null;
 }
 
-const MetaRow: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+const MetaRow: React.FC<{ label: string; value: string; textStyle?: TextStyle }> = ({
+  label,
+  value,
+  textStyle,
+}) => (
   <HStack justifyContent="space-between" py="$0.5">
-    <Text style={styles.metaLabel}>{label}</Text>
-    <Text style={styles.metaValue}>{value}</Text>
+    <Text style={[styles.metaLabel, textStyle]}>{label}</Text>
+    <Text style={[styles.metaValue, textStyle]}>{value}</Text>
   </HStack>
 );
 
-const SectionTitle: React.FC<{ title: string }> = ({ title }) => (
-  <Text style={styles.sectionTitle}>{title}</Text>
-);
+const SectionTitle: React.FC<{ title: string; textStyle?: TextStyle }> = ({
+  title,
+  textStyle,
+}) => <Text style={[styles.sectionTitle, textStyle]}>{title}</Text>;
 
-const Divider: React.FC = () => <View style={styles.divider} />;
+const Divider: React.FC<{ style?: ViewStyle }> = ({ style }) => (
+  <View style={[styles.divider, style]} />
+);
 
 export const SystemReportView: React.FC<SystemReportViewProps> = ({
   report,
   settings,
 }) => {
+  const logoUrl = useReceiptLogoUri(settings, null);
+  const {
+    customization,
+    bodyText,
+    companyNameStyle,
+    companyDetailsStyle,
+    dividerOverride,
+    logoWidth,
+    logoHeight,
+  } = useReceiptStyleScale(settings);
+  const showLogo = Boolean(logoUrl && customization.showLogo);
+
   const currency = resolveCurrencyCode(settings?.company?.currency);
   const header = report.header;
   const now = new Date();
@@ -46,50 +67,61 @@ export const SystemReportView: React.FC<SystemReportViewProps> = ({
 
     return (
       <VStack space="sm">
-        <SectionTitle title="Today" />
+        <SectionTitle title="Today" textStyle={bodyText(11)} />
         <MetaRow
           label="Sales"
           value={`${summary.today_sales_count} · ${formatCurrency(summary.today_sales_amount, currency)}`}
+          textStyle={bodyText(12)}
         />
         {(summary.today_returns_count ?? 0) > 0 ? (
           <MetaRow
             label="Returns"
             value={`${summary.today_returns_count} · ${formatCurrency(summary.today_returns_amount, currency)}`}
+            textStyle={bodyText(12)}
           />
         ) : null}
         {summary.today_net_sales_amount != null ? (
           <MetaRow
             label="Net sales"
             value={formatCurrency(summary.today_net_sales_amount, currency)}
+            textStyle={bodyText(12)}
           />
         ) : null}
         <MetaRow
           label="Purchases"
           value={`${summary.today_purchases_count} · ${formatCurrency(summary.today_purchases_amount, currency)}`}
+          textStyle={bodyText(12)}
         />
         {(report.purchase_rows ?? []).length > 0 ? renderPurchaseRows() : null}
         <MetaRow
           label="Expenses"
           value={formatCurrency(metrics.today_expenses_amount, currency)}
+          textStyle={bodyText(12)}
         />
         <MetaRow
           label="Payments"
           value={formatCurrency(metrics.today_payments_amount, currency)}
+          textStyle={bodyText(12)}
         />
 
-        <Divider />
-        <SectionTitle title="Inventory" />
-        <MetaRow label="Active items" value={String(metrics.active_items)} />
-        <MetaRow label="Low stock" value={String(metrics.low_stock_count)} />
-        <MetaRow label="Reorder items" value={String(summary.reorder_items_count)} />
+        <Divider style={dividerOverride} />
+        <SectionTitle title="Inventory" textStyle={bodyText(11)} />
+        <MetaRow label="Active items" value={String(metrics.active_items)} textStyle={bodyText(12)} />
+        <MetaRow label="Low stock" value={String(metrics.low_stock_count)} textStyle={bodyText(12)} />
+        <MetaRow
+          label="Reorder items"
+          value={String(summary.reorder_items_count)}
+          textStyle={bodyText(12)}
+        />
 
-        <Divider />
-        <SectionTitle title="Other" />
-        <MetaRow label="Hold orders" value={String(metrics.hold_orders_count)} />
-        <MetaRow label="Customers" value={String(metrics.customers_count)} />
+        <Divider style={dividerOverride} />
+        <SectionTitle title="Other" textStyle={bodyText(11)} />
+        <MetaRow label="Hold orders" value={String(metrics.hold_orders_count)} textStyle={bodyText(12)} />
+        <MetaRow label="Customers" value={String(metrics.customers_count)} textStyle={bodyText(12)} />
         <MetaRow
           label="Month sales"
           value={formatCurrency(metrics.month_sales_amount, currency)}
+          textStyle={bodyText(12)}
         />
       </VStack>
     );
@@ -107,19 +139,19 @@ export const SystemReportView: React.FC<SystemReportViewProps> = ({
         <View key={`${row.id}-${row.sales_id}`} style={styles.rowCard}>
           <HStack justifyContent="space-between" alignItems="flex-start">
             <VStack flex={1} pr="$2">
-              <Text style={styles.rowTitle}>{row.sales_id}</Text>
+              <Text style={[styles.rowTitle, bodyText(13)]}>{row.sales_id}</Text>
               {row.customer_name ? (
-                <Text style={styles.rowSub}>{row.customer_name}</Text>
+                <Text style={[styles.rowSub, bodyText(12)]}>{row.customer_name}</Text>
               ) : null}
-              <Text style={styles.rowMeta}>
+              <Text style={[styles.rowMeta, bodyText(11)]}>
                 {[row.payment_method, row.time, row.location].filter(Boolean).join(' · ')}
               </Text>
             </VStack>
             <VStack alignItems="flex-end">
-              <Text style={[styles.rowAmount, isReturn && { color: colors.error }]}>
+              <Text style={[styles.rowAmount, bodyText(13), isReturn && { color: colors.error }]}>
                 {formatCurrency(row.amount, currency)}
               </Text>
-              <Text style={[styles.rowBadge, isReturn && styles.rowBadgeReturn]}>
+              <Text style={[styles.rowBadge, bodyText(10), isReturn && styles.rowBadgeReturn]}>
                 {isReturn ? 'Return' : 'Sale'}
               </Text>
             </VStack>
@@ -139,13 +171,17 @@ export const SystemReportView: React.FC<SystemReportViewProps> = ({
       <View key={`${row.id}-${row.invoice_id}`} style={styles.rowCard}>
         <HStack justifyContent="space-between" alignItems="flex-start">
           <VStack flex={1} pr="$2">
-            <Text style={styles.rowTitle}>{row.invoice_id}</Text>
-            {row.supplier_name ? <Text style={styles.rowSub}>{row.supplier_name}</Text> : null}
-            <Text style={styles.rowMeta}>
+            <Text style={[styles.rowTitle, bodyText(13)]}>{row.invoice_id}</Text>
+            {row.supplier_name ? (
+              <Text style={[styles.rowSub, bodyText(12)]}>{row.supplier_name}</Text>
+            ) : null}
+            <Text style={[styles.rowMeta, bodyText(11)]}>
               {[row.payment_method, row.time, row.location].filter(Boolean).join(' · ')}
             </Text>
           </VStack>
-          <Text style={styles.rowAmount}>{formatCurrency(row.amount, currency)}</Text>
+          <Text style={[styles.rowAmount, bodyText(13)]}>
+            {formatCurrency(row.amount, currency)}
+          </Text>
         </HStack>
       </View>
     ));
@@ -159,11 +195,11 @@ export const SystemReportView: React.FC<SystemReportViewProps> = ({
 
     return rows.map(row => (
       <View key={row.id} style={styles.rowCard}>
-        <Text style={styles.rowTitle}>
+        <Text style={[styles.rowTitle, bodyText(13)]}>
           {row.item_number ? `${row.item_number} · ` : ''}
           {row.description}
         </Text>
-        <Text style={styles.rowMeta}>
+        <Text style={[styles.rowMeta, bodyText(11)]}>
           Stock {row.qty}
           {row.uom ? ` ${row.uom}` : ''} · Reorder {row.reorder_qty}
           {row.location ? ` · ${row.location}` : ''}
@@ -174,17 +210,37 @@ export const SystemReportView: React.FC<SystemReportViewProps> = ({
 
   return (
     <View style={styles.paper}>
-      <Text style={styles.companyName}>{header.company_name ?? 'Business Report'}</Text>
-      {header.address ? <Text style={styles.mutedCenter}>{header.address}</Text> : null}
-      {header.phone ? <Text style={styles.mutedCenter}>Tel: {header.phone}</Text> : null}
-      {header.email ? <Text style={styles.mutedCenter}>{header.email}</Text> : null}
-      {header.tax_id ? <Text style={styles.mutedCenter}>Tax ID: {header.tax_id}</Text> : null}
+      {showLogo && logoUrl ? (
+        <Image
+          source={{ uri: logoUrl }}
+          style={[styles.logo, { width: logoWidth, height: logoHeight }]}
+          resizeMode="contain"
+        />
+      ) : null}
 
-      <Divider />
-      <Text style={styles.reportTitle}>{report.title}</Text>
-      {report.subtitle ? <Text style={styles.mutedCenter}>{report.subtitle}</Text> : null}
+      <Text style={[styles.companyName, companyNameStyle]}>
+        {header.company_name ?? 'Business Report'}
+      </Text>
+      {header.address ? (
+        <Text style={[styles.mutedCenter, companyDetailsStyle]}>{header.address}</Text>
+      ) : null}
+      {header.phone ? (
+        <Text style={[styles.mutedCenter, companyDetailsStyle]}>Tel: {header.phone}</Text>
+      ) : null}
+      {header.email ? (
+        <Text style={[styles.mutedCenter, companyDetailsStyle]}>{header.email}</Text>
+      ) : null}
+      {header.tax_id ? (
+        <Text style={[styles.mutedCenter, companyDetailsStyle]}>Tax ID: {header.tax_id}</Text>
+      ) : null}
+
+      <Divider style={dividerOverride} />
+      <Text style={[styles.reportTitle, bodyText(14)]}>{report.title}</Text>
+      {report.subtitle ? (
+        <Text style={[styles.mutedCenter, bodyText(12)]}>{report.subtitle}</Text>
+      ) : null}
       {report.generated_at ? (
-        <Text style={styles.mutedCenter}>
+        <Text style={[styles.mutedCenter, bodyText(12)]}>
           Generated:{' '}
           {parseBackendTimestamp(report.generated_at).toLocaleString(undefined, {
             dateStyle: 'medium',
@@ -199,8 +255,8 @@ export const SystemReportView: React.FC<SystemReportViewProps> = ({
         {report.type === 'reorder' ? renderReorderRows() : null}
       </View>
 
-      <Divider />
-      <Text style={styles.footerNote}>Printed: {printedAt}</Text>
+      <Divider style={dividerOverride} />
+      <Text style={[styles.footerNote, bodyText(10)]}>Printed: {printedAt}</Text>
     </View>
   );
 };
@@ -215,6 +271,12 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     alignSelf: 'center',
     width: '100%',
+  },
+  logo: {
+    width: 120,
+    height: 56,
+    alignSelf: 'center',
+    marginBottom: 8,
   },
   companyName: {
     fontSize: 18,

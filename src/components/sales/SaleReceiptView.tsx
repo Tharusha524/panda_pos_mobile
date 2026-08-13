@@ -2,11 +2,7 @@ import React from 'react';
 import { Image, StyleSheet, View, type TextStyle } from 'react-native';
 import { HStack, Text, VStack } from '@gluestack-ui/themed';
 import { useReceiptLogoUri } from '@/hooks/useReceiptLogoUri';
-import { useReceiptPrintCustomization } from '@/hooks/useReceiptPrintCustomization';
-import {
-  DEFAULT_RECEIPT_PRINT_CUSTOMIZATION,
-  type ReceiptTextWeight,
-} from '@/types/receiptPrint';
+import { useReceiptStyleScale } from '@/hooks/useReceiptStyleScale';
 import {
   DEFAULT_RECEIPT_STORE_NAME,
   getSaleReceiptTitle,
@@ -34,15 +30,6 @@ interface SaleReceiptViewProps {
   customerOutstandingBalance?: number | null;
 }
 
-const WEIGHT_MAP: Record<ReceiptTextWeight, TextStyle['fontWeight']> = {
-  regular: '400',
-  medium: '600',
-  bold: '700',
-};
-
-// The logo's original box was 120×56 — keep that aspect ratio as its width is resized.
-const LOGO_ASPECT_RATIO = 56 / 120;
-
 export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
   receipt,
   settings,
@@ -55,8 +42,15 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
     receipt.hardware_settings ??
     {}) as Record<string, unknown>;
   const logoUrl = useReceiptLogoUri(settings, receipt);
-  const loadedCustomization = useReceiptPrintCustomization(settings);
-  const customization = customizationOverride ?? loadedCustomization;
+  const {
+    bodyText,
+    bodyTextSizeOnly,
+    companyNameStyle,
+    companyDetailsStyle,
+    dividerOverride,
+    logoWidth,
+    logoHeight,
+  } = useReceiptStyleScale(settings, customizationOverride);
 
   const currency = resolveCurrencyCode(settings?.company?.currency);
   const companyName =
@@ -75,49 +69,6 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
   const showLogo = Boolean(
     logoUrl && hardware.allow_logo_on_sales_receipt !== false,
   );
-
-  // Every body-text line's font size scales proportionally around this baseline
-  // (instead of every line getting its own independent control), so the receipt's
-  // existing size hierarchy — totals bigger than footnotes — is preserved rather
-  // than flattened. 'regular' weight means "leave each line's own designed weight
-  // alone", so at the defaults this renders pixel-identical to the original
-  // hardcoded styles below.
-  const bodyScale =
-    customization.receiptBodyTextSizePx /
-    DEFAULT_RECEIPT_PRINT_CUSTOMIZATION.receiptBodyTextSizePx;
-  const bodyWeightOverride =
-    customization.receiptBodyTextWeight === 'regular'
-      ? undefined
-      : WEIGHT_MAP[customization.receiptBodyTextWeight];
-  const scaleFont = (base: number) => Math.max(8, Math.round(base * bodyScale));
-  /** Scales font size and, unless the weight is left at 'regular', overrides the
-   * line's weight too. Used for ordinary body text. */
-  const bodyText = (base: number): TextStyle => ({
-    fontSize: scaleFont(base),
-    ...(bodyWeightOverride ? { fontWeight: bodyWeightOverride } : null),
-  });
-  /** Scales font size only — used for the grand total, which always stays at its
-   * own extra-bold weight regardless of the body text weight setting, so the key
-   * number on the receipt never loses emphasis. */
-  const bodyTextSizeOnly = (base: number): TextStyle => ({ fontSize: scaleFont(base) });
-
-  const logoWidth = customization.receiptLogoWidthPx;
-  const logoHeight = Math.round(logoWidth * LOGO_ASPECT_RATIO);
-  const companyNameStyle: TextStyle = {
-    fontSize: customization.receiptCompanyNameSizePx,
-    fontWeight: WEIGHT_MAP[customization.receiptCompanyNameWeight],
-  };
-  // Company details block (address/phone/email/tax ID/reg no) has its own
-  // dedicated size+weight, separate from the general body text control below.
-  const companyDetailsStyle: TextStyle = {
-    fontSize: customization.receiptCompanyDetailsSizePx,
-    ...(customization.receiptCompanyDetailsWeight === 'regular'
-      ? null
-      : { fontWeight: WEIGHT_MAP[customization.receiptCompanyDetailsWeight] }),
-  };
-  // Both divider styles below are overridden to this thickness and rendered fully
-  // solid black — see receiptDividerThicknessPx doc comment.
-  const dividerOverride = { height: customization.receiptDividerThicknessPx };
 
   const now = new Date();
   const printedAt = `${now.toLocaleDateString()} ${now.toLocaleTimeString([], {

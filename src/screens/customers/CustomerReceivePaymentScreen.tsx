@@ -137,10 +137,9 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
         confirmLabel: 'Print Receipt',
         cancelLabel: 'Done',
         onConfirm: () => {
-          const header = buildPrintHeaderFromSettings(settings);
-          bluetoothPrintService
-            .printPaymentReceipt(result, header, paidNotes, settings)
-            .catch(e => showErrorFromUnknown(e, 'Print receipt'));
+          navigation.navigate('PaymentReceipt', {
+            receipt: { result, notes: paidNotes || null },
+          });
         },
       });
       navigation.goBack();

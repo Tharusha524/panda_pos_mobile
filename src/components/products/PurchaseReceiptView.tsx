@@ -1,7 +1,8 @@
 import React from 'react';
-import { Image, StyleSheet, View } from 'react-native';
+import { Image, StyleSheet, View, type TextStyle } from 'react-native';
 import { HStack, Text, VStack } from '@gluestack-ui/themed';
 import { useReceiptLogoUri } from '@/hooks/useReceiptLogoUri';
+import { useReceiptStyleScale } from '@/hooks/useReceiptStyleScale';
 import {
   PURCHASE_RECEIPT_TITLE,
   RECEIPT_SOFTWARE_PROVIDER,
@@ -25,6 +26,17 @@ export const PurchaseReceiptView: React.FC<PurchaseReceiptViewProps> = ({
   const purchase = receipt.purchase;
   const header = receipt.header as Record<string, string | undefined>;
   const logoUrl = useReceiptLogoUri(settings, receipt);
+  const {
+    customization,
+    bodyText,
+    bodyTextSizeOnly,
+    companyNameStyle,
+    companyDetailsStyle,
+    dividerOverride,
+    logoWidth,
+    logoHeight,
+  } = useReceiptStyleScale(settings);
+  const showLogo = Boolean(logoUrl && customization.showLogo);
 
   const currency = resolveCurrencyCode(settings?.company?.currency);
   const companyName =
@@ -49,53 +61,70 @@ export const PurchaseReceiptView: React.FC<PurchaseReceiptViewProps> = ({
 
   return (
     <View style={styles.paper}>
-      {logoUrl ? (
-        <Image source={{ uri: logoUrl }} style={styles.logo} resizeMode="contain" />
+      {showLogo && logoUrl ? (
+        <Image
+          source={{ uri: logoUrl }}
+          style={[styles.logo, { width: logoWidth, height: logoHeight }]}
+          resizeMode="contain"
+        />
       ) : null}
 
-      <Text style={styles.companyName}>{companyName}</Text>
-      {address ? <Text style={styles.mutedCenter}>{address}</Text> : null}
-      {phone ? <Text style={styles.mutedCenter}>Tel: {phone}</Text> : null}
+      <Text style={[styles.companyName, companyNameStyle]}>{companyName}</Text>
+      {address ? <Text style={[styles.mutedCenter, companyDetailsStyle]}>{address}</Text> : null}
+      {phone ? (
+        <Text style={[styles.mutedCenter, companyDetailsStyle]}>Tel: {phone}</Text>
+      ) : null}
 
-      <View style={styles.divider} />
-      <Text style={styles.invoiceTitle}>{PURCHASE_RECEIPT_TITLE}</Text>
-      <Text style={styles.mutedCenter}>Receipt: {purchase.invoice_id}</Text>
-      <Text style={styles.mutedCenter}>
+      <View style={[styles.divider, dividerOverride]} />
+      <Text style={[styles.invoiceTitle, bodyText(14)]}>{PURCHASE_RECEIPT_TITLE}</Text>
+      <Text style={[styles.mutedCenter, bodyText(11)]}>Receipt: {purchase.invoice_id}</Text>
+      <Text style={[styles.mutedCenter, bodyText(11)]}>
         All amounts in {getCurrencyLabel(currency)}
       </Text>
 
       <View style={styles.metaBlock}>
-        <MetaRow label="Date" value={purchase.purchase_date} />
-        {purchase.location ? <MetaRow label="Location" value={purchase.location} /> : null}
-        <MetaRow label="Payment" value={purchase.payment_method ?? 'Cash'} />
+        <MetaRow label="Date" value={purchase.purchase_date} textStyle={bodyText(11)} />
+        {purchase.location ? (
+          <MetaRow label="Location" value={purchase.location} textStyle={bodyText(11)} />
+        ) : null}
+        <MetaRow
+          label="Payment"
+          value={purchase.payment_method ?? 'Cash'}
+          textStyle={bodyText(11)}
+        />
       </View>
 
       {supplierInfoRows.length > 0 ? (
         <>
-          <View style={styles.dividerThin} />
-          <Text style={styles.partyTitle}>Supplier Information</Text>
+          <View style={[styles.dividerThin, dividerOverride]} />
+          <Text style={[styles.partyTitle, bodyText(10)]}>Supplier Information</Text>
           <View style={styles.partyBlock}>
             {supplierInfoRows.map(row => (
-              <MetaRow key={row.label} label={row.label} value={String(row.value)} />
+              <MetaRow
+                key={row.label}
+                label={row.label}
+                value={String(row.value)}
+                textStyle={bodyText(11)}
+              />
             ))}
           </View>
         </>
       ) : null}
 
       <View style={styles.tableHead}>
-        <Text style={[styles.th, styles.colItem]}>Item</Text>
-        <Text style={[styles.th, styles.colQty]}>Qty</Text>
-        <Text style={[styles.th, styles.colAmt]}>Amount</Text>
+        <Text style={[styles.th, styles.colItem, bodyText(10)]}>Item</Text>
+        <Text style={[styles.th, styles.colQty, bodyText(10)]}>Qty</Text>
+        <Text style={[styles.th, styles.colAmt, bodyText(10)]}>Amount</Text>
       </View>
-      <View style={styles.dividerThin} />
+      <View style={[styles.dividerThin, dividerOverride]} />
 
       {purchase.lines.map((line, idx) => {
         const uom = resolveLineUom(line.uom);
         return (
         <View key={`${line.item_number}-${idx}`} style={styles.lineRow}>
           <VStack style={styles.colItem} flex={1}>
-            <Text style={styles.lineDesc}>{line.description}</Text>
-            <Text style={styles.lineSub}>
+            <Text style={[styles.lineDesc, bodyText(12)]}>{line.description}</Text>
+            <Text style={[styles.lineSub, bodyText(10)]}>
               {line.item_number ? `ID ${line.item_number} · ` : ''}
               {formatReceiptQtyDetail(
                 line.qty,
@@ -104,53 +133,72 @@ export const PurchaseReceiptView: React.FC<PurchaseReceiptViewProps> = ({
               )}
             </Text>
           </VStack>
-          <Text style={[styles.lineQty, styles.colQty]}>{`${line.qty} ${uom}`}</Text>
-          <Text style={[styles.lineAmt, styles.colAmt]}>
+          <Text style={[styles.lineQty, styles.colQty, bodyText(10)]}>{`${line.qty} ${uom}`}</Text>
+          <Text style={[styles.lineAmt, styles.colAmt, bodyText(12)]}>
             {formatCurrency(line.line_total, currency)}
           </Text>
         </View>
         );
       })}
 
-      <View style={styles.divider} />
-      <TotalRow label="Subtotal" value={formatCurrency(purchase.sub_total, currency)} />
+      <View style={[styles.divider, dividerOverride]} />
+      <TotalRow
+        label="Subtotal"
+        value={formatCurrency(purchase.sub_total, currency)}
+        textStyle={bodyText(12)}
+      />
       {purchase.discount > 0 ? (
         <TotalRow
           label="Discount"
           value={`-${formatCurrency(purchase.discount, currency)}`}
+          textStyle={bodyText(12)}
         />
       ) : null}
       <View style={styles.grandRow}>
-        <Text style={styles.grandLabel}>TOTAL</Text>
-        <Text style={styles.grandValue}>{formatCurrency(purchase.amount, currency)}</Text>
+        <Text style={[styles.grandLabel, bodyTextSizeOnly(13)]}>TOTAL</Text>
+        <Text style={[styles.grandValue, bodyTextSizeOnly(16)]}>
+          {formatCurrency(purchase.amount, currency)}
+        </Text>
       </View>
       {purchase.amount_paid != null ? (
-        <TotalRow label="Paid" value={formatCurrency(purchase.amount_paid, currency)} />
+        <TotalRow
+          label="Paid"
+          value={formatCurrency(purchase.amount_paid, currency)}
+          textStyle={bodyText(12)}
+        />
       ) : null}
       {purchase.notes ? (
-        <Text style={styles.notes}>{purchase.notes}</Text>
+        <Text style={[styles.notes, bodyText(10)]}>{purchase.notes}</Text>
       ) : null}
 
-      <View style={styles.divider} />
-      <Text style={styles.thankYou}>Purchase recorded successfully</Text>
-      <Text style={styles.softwareLine}>{RECEIPT_SOFTWARE_PROVIDER}</Text>
-      <Text style={styles.softwareLine}>{RECEIPT_SOFTWARE_WEBSITE}</Text>
-      <Text style={styles.footerNote}>Printed: {printedAt}</Text>
+      <View style={[styles.divider, dividerOverride]} />
+      <Text style={[styles.thankYou, bodyText(12)]}>Purchase recorded successfully</Text>
+      <Text style={[styles.softwareLine, bodyText(11)]}>{RECEIPT_SOFTWARE_PROVIDER}</Text>
+      <Text style={[styles.softwareLine, bodyText(11)]}>{RECEIPT_SOFTWARE_WEBSITE}</Text>
+      <Text style={[styles.footerNote, bodyText(9)]}>Printed: {printedAt}</Text>
     </View>
   );
 };
 
-const MetaRow: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+const MetaRow: React.FC<{ label: string; value: string; textStyle?: TextStyle }> = ({
+  label,
+  value,
+  textStyle,
+}) => (
   <HStack justifyContent="space-between" py="$0.5">
-    <Text style={styles.metaLabel}>{label}</Text>
-    <Text style={styles.metaValue}>{value}</Text>
+    <Text style={[styles.metaLabel, textStyle]}>{label}</Text>
+    <Text style={[styles.metaValue, textStyle]}>{value}</Text>
   </HStack>
 );
 
-const TotalRow: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+const TotalRow: React.FC<{ label: string; value: string; textStyle?: TextStyle }> = ({
+  label,
+  value,
+  textStyle,
+}) => (
   <HStack justifyContent="space-between" py="$1">
-    <Text style={styles.totalLabel}>{label}</Text>
-    <Text style={styles.totalValue}>{value}</Text>
+    <Text style={[styles.totalLabel, textStyle]}>{label}</Text>
+    <Text style={[styles.totalValue, textStyle]}>{value}</Text>
   </HStack>
 );
 

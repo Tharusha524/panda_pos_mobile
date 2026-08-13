@@ -2,6 +2,7 @@ import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { PurchaseReceiptPayload } from '@/types/inventory';
 import type { ItemSelectAction } from '@/types/inventory';
 import type { SaleReceiptPayload } from '@/types/sales';
+import type { PaymentReceiptPayload } from '@/types/customers';
 import type { SystemReportType, ReportCategoryId } from '@/types/reports';
 
 export type TodayActivityTab = 'sales' | 'purchases' | 'reorder';
@@ -15,6 +16,7 @@ export type HomeStackParamList = {
   CustomerReceivePayment: { customerId: number };
   CustomerHistory: { customerId: number };
   CustomerSaleReceipt: { receipt: SaleReceiptPayload; customerId?: number | null };
+  PaymentReceipt: { receipt: PaymentReceiptPayload };
   ExpensesList: undefined;
   ExpenseForm: { expenseId?: number };
 };
