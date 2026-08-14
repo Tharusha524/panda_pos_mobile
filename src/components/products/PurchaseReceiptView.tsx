@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
   },
   colItem: { flex: 1 },
   colQty: { width: 52, textAlign: 'right' },
-  colAmt: { width: 72, textAlign: 'right' },
+  colAmt: { width: 100, textAlign: 'right' },
   lineRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',

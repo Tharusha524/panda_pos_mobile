@@ -4,6 +4,11 @@ import { cartLineKey } from '@/utils/batchUtils';
 /** Map original bill sales_id → cart line key → total qty already returned */
 export type ReturnedQtyByOriginalSale = Map<string, Map<string, number>>;
 
+// Quantities come from the backend as floats and float subtraction/addition
+// can leave tiny remainders (e.g. 1.9999999998 instead of 2). Round to 2dp
+// after every add/subtract so the UI never shows those artifacts.
+const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
 export function saleReturnLineKey(
   itemId: number,
   itemBatchId?: number | null,
@@ -45,7 +50,7 @@ export function buildReturnedQtyByOriginalSale(
         continue;
       }
       const lineKey = saleReturnLineKey(line.item_id, line.item_batch_id);
-      lineMap.set(lineKey, (lineMap.get(lineKey) ?? 0) + line.qty);
+      lineMap.set(lineKey, round2((lineMap.get(lineKey) ?? 0) + line.qty));
     }
   }
 
@@ -65,7 +70,7 @@ export function getRemainingReturnQtyByLine(
       continue;
     }
     const lineKey = saleReturnLineKey(line.item_id, line.item_batch_id);
-    const left = line.qty - (returned.get(lineKey) ?? 0);
+    const left = round2(line.qty - (returned.get(lineKey) ?? 0));
     if (left > 0) {
       remaining.set(lineKey, left);
     }
