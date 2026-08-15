@@ -10,6 +10,7 @@ import { LoadingOverlay } from '@/components/common/LoadingOverlay';
 import { PosCategoryBar } from '@/components/sales/PosCategoryBar';
 import { SaleModeToggle } from '@/components/sales/SaleModeToggle';
 import { ReturnSalePicker } from '@/components/sales/ReturnSalePicker';
+import { ExchangeReturnItemsStrip } from '@/components/sales/ExchangeReturnItemsStrip';
 import { PosProductGrid } from '@/components/sales/PosProductGrid';
 import { PosBatchSelectModal } from '@/components/sales/PosBatchSelectModal';
 import { PosDockCartBar } from '@/components/sales/PosDockCartBar';
@@ -134,7 +135,7 @@ export const SalesScreen: React.FC = () => {
         <View style={styles.metaRow}>
           <View style={styles.metaTextCol}>
             <Text style={styles.metaTitle}>
-              {pos.isReturn ? 'Return' : 'Menu'}
+              {pos.isReturn ? 'Return' : pos.isExchange ? 'Exchange' : 'Menu'}
             </Text>
             {!pos.isReturn ? (
               <Text style={styles.metaSub} numberOfLines={1}>
@@ -176,7 +177,19 @@ export const SalesScreen: React.FC = () => {
             onSelectSubCategory={pos.setSubCategoryId}
           />
         ) : null}
-        {pos.isReturn ? <ReturnSalePicker /> : null}
+        {pos.isReturn || pos.isExchange ? (
+          <ReturnSalePicker allowWithoutBill={!pos.isExchange} />
+        ) : null}
+        {pos.isExchange && pos.returnSourceSale ? (
+          <ExchangeReturnItemsStrip
+            items={pos.returnDisplayItems}
+            currency={currency}
+            getQty={pos.getReturnCartQty}
+            onIncrement={item => pos.tryAddReturnLineToCart(item, 1)}
+            onDecrement={pos.decrementReturnLineInCart}
+            onSetQty={pos.setReturnLineQty}
+          />
+        ) : null}
       </View>
 
       <View style={styles.flex}>

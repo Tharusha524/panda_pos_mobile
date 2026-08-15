@@ -3,6 +3,7 @@ import type { PurchaseReceiptPayload } from '@/types/inventory';
 import type { ItemSelectAction } from '@/types/inventory';
 import type { SaleReceiptPayload } from '@/types/sales';
 import type { PaymentReceiptPayload } from '@/types/customers';
+import type { PaymentDetailPayload } from '@/types/payments';
 import type { SystemReportType, ReportCategoryId } from '@/types/reports';
 
 export type TodayActivityTab = 'sales' | 'purchases' | 'reorder';
@@ -17,6 +18,7 @@ export type HomeStackParamList = {
   CustomerHistory: { customerId: number };
   CustomerSaleReceipt: { receipt: SaleReceiptPayload; customerId?: number | null };
   PaymentReceipt: { receipt: PaymentReceiptPayload };
+  PaymentDetailReceipt: { payment: PaymentDetailPayload };
   ExpensesList: undefined;
   ExpenseForm: { expenseId?: number };
 };

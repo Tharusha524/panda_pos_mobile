@@ -166,10 +166,41 @@ export const SaleOrderScreen: React.FC = () => {
     [getLineTotalPreview, pos.cart],
   );
 
-  const previewOrderTotal = useMemo(
-    () => round2(Math.max(0, previewSubTotal - pos.discount - pos.offerDiscount)),
-    [pos.discount, pos.offerDiscount, previewSubTotal],
+  /** Exchange mode only — sale-direction lines total (mirrors pos.saleSubTotal but reflects live draft edits). */
+  const previewSaleSubTotal = useMemo(
+    () =>
+      round2(
+        pos.cart
+          .filter(l => l.line_direction !== 'return')
+          .reduce((sum, line) => sum + getLineTotalPreview(line), 0),
+      ),
+    [getLineTotalPreview, pos.cart],
   );
+
+  /** Exchange mode only — return-direction lines total (mirrors pos.returnSubTotal but reflects live draft edits). */
+  const previewReturnSubTotal = useMemo(
+    () =>
+      round2(
+        pos.cart
+          .filter(l => l.line_direction === 'return')
+          .reduce((sum, line) => sum + getLineTotalPreview(line), 0),
+      ),
+    [getLineTotalPreview, pos.cart],
+  );
+
+  /** Base subtotal for manual discount clamping — sale side only in Exchange mode. */
+  const previewDiscountBase = pos.isExchange ? previewSaleSubTotal : previewSubTotal;
+
+  const previewOrderTotal = useMemo(() => {
+    if (pos.isExchange) {
+      // Signed — negative means a refund is due to the customer.
+      return round2(previewSaleSubTotal - pos.discount - pos.offerDiscount - previewReturnSubTotal);
+    }
+    return round2(Math.max(0, previewSubTotal - pos.discount - pos.offerDiscount));
+  }, [pos.isExchange, previewSaleSubTotal, previewReturnSubTotal, pos.discount, pos.offerDiscount, previewSubTotal]);
+
+  const isRefundDue = pos.isExchange && previewOrderTotal < 0;
+  const needsRefundCardUi = pos.isReturn || isRefundDue;
 
   const buildCheckoutCart = useCallback((): CartLine[] => {
     return pos.cart.map(line => {
@@ -232,8 +263,13 @@ export const SaleOrderScreen: React.FC = () => {
   useEffect(() => {
     // Credit means nothing is collected at the point of sale — default to 0 so an
     // un-edited field doesn't submit "fully paid" for a sale that's actually owed.
-    setAmountReceived(isCreditPayment(paymentMethod) ? '0' : String(previewOrderTotal));
-  }, [previewOrderTotal, paymentMethod]);
+    // A refund-due exchange shows/collects the positive refund magnitude, matching
+    // PaymentMethodDetails' netAmount for the same case.
+    const defaultAmount = isRefundDue
+      ? Math.abs(previewOrderTotal)
+      : previewOrderTotal;
+    setAmountReceived(isCreditPayment(paymentMethod) ? '0' : String(defaultAmount));
+  }, [isRefundDue, previewOrderTotal, paymentMethod]);
 
   useEffect(() => {
     setQtyDrafts(prev => {
@@ -283,7 +319,7 @@ export const SaleOrderScreen: React.FC = () => {
   }, [pos.returnFromCreditSale, pos.paymentMethods, pos.setPaymentMethod]);
 
   useEffect(() => {
-    if (!pos.isReturn) {
+    if (!pos.isReturn && !pos.isExchange) {
       setRefundCardReady(true);
       return;
     }
@@ -301,7 +337,7 @@ export const SaleOrderScreen: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [pos.isReturn]);
+  }, [pos.isExchange, pos.isReturn]);
 
   useEffect(() => {
     if (!needsBank(paymentMethod)) {
@@ -421,14 +457,14 @@ export const SaleOrderScreen: React.FC = () => {
       return;
     }
     const next = round2(Math.max(0, parsed));
-    if (next > previewSubTotal) {
+    if (next > previewDiscountBase) {
       showError({
         title: 'Discount',
         message: 'Discount cannot be more than subtotal.',
         variant: 'warning',
       });
-      applyPosDiscount('amount', previewSubTotal);
-      setDiscountDraft(String(previewSubTotal));
+      applyPosDiscount('amount', previewDiscountBase);
+      setDiscountDraft(String(previewDiscountBase));
       return;
     }
     applyPosDiscount('amount', next);
@@ -437,7 +473,7 @@ export const SaleOrderScreen: React.FC = () => {
     applyPosDiscount,
     discountDraft,
     discountMode,
-    previewSubTotal,
+    previewDiscountBase,
     showError,
   ]);
 
@@ -492,7 +528,12 @@ export const SaleOrderScreen: React.FC = () => {
     commitAllQtyDrafts();
     commitAllPriceDrafts();
 
-    if (!pos.isReturn && pos.cartHasStockIssuesFor(pos.prepareCheckout(checkoutCart).lines)) {
+    const preparedLines = pos.prepareCheckout(checkoutCart).lines;
+    const stockCheckLines = pos.isExchange
+      ? preparedLines.filter(l => l.line_direction !== 'return')
+      : preparedLines;
+
+    if (!pos.isReturn && pos.cartHasStockIssuesFor(stockCheckLines)) {
       showError({
         title: 'Stock issue',
         message: 'Remove or reduce out-of-stock items before payment.',
@@ -501,11 +542,21 @@ export const SaleOrderScreen: React.FC = () => {
       return;
     }
 
-    const refundDigits = pos.isReturn
+    if (pos.isExchange && checkoutCart.some(l => l.line_direction === 'return') && !pos.returnSourceSale) {
+      showError({
+        title: 'Exchange',
+        message: 'Pick the original bill before adding return items.',
+        variant: 'warning',
+      });
+      return;
+    }
+
+    const needsRefundCard = pos.isReturn || (pos.isExchange && previewOrderTotal < 0);
+    const refundDigits = needsRefundCard
       ? (savedRefundCardLast4 ?? refundCardLast4).replace(/\D/g, '').slice(-4)
       : '';
 
-    if (pos.isReturn && !pos.returnFromCreditSale && refundDigits.length !== 4) {
+    if (needsRefundCard && !pos.returnFromCreditSale && refundDigits.length !== 4) {
       showError({
         title: 'Refund card',
         message: 'Enter credit card last 4 digits once. They will be saved for future returns.',
@@ -564,7 +615,10 @@ export const SaleOrderScreen: React.FC = () => {
     // `|| previewOrderTotal` would silently turn a real "0" (Credit — nothing collected)
     // back into the full total, since 0 is falsy — check for NaN specifically instead.
     const parsedReceived = parseFloat(amountReceived);
-    const received = Number.isNaN(parsedReceived) ? previewOrderTotal : parsedReceived;
+    const fallbackReceived = isRefundDue
+      ? Math.abs(previewOrderTotal)
+      : previewOrderTotal;
+    const received = Number.isNaN(parsedReceived) ? fallbackReceived : parsedReceived;
     const paymentNotes = buildPaymentNotes(paymentMethod, {
       reference: paymentReference,
       cardLast4: paymentCardLast4,
@@ -576,9 +630,10 @@ export const SaleOrderScreen: React.FC = () => {
       bank_id: needsBank(paymentMethod) ? bankId : null,
       cheque_number: /cheque/i.test(paymentMethod) ? chequeNumber.trim() || undefined : undefined,
       notes: paymentNotes,
-      refund_card_last4: pos.isReturn ? refundDigits : null,
+      refund_card_last4: needsRefundCard ? refundDigits : null,
       hold_pin: holdPin,
-      original_sale_id: pos.isReturn ? originalSaleId.trim() || null : null,
+      original_sale_id:
+        pos.isReturn || pos.isExchange ? originalSaleId.trim() || null : null,
       cart: checkoutCart,
     });
 
@@ -590,7 +645,7 @@ export const SaleOrderScreen: React.FC = () => {
       await saveHoldPin(holdPin);
     }
 
-    if (pos.isReturn && refundDigits.length === 4 && !savedRefundCardLast4) {
+    if (needsRefundCard && refundDigits.length === 4 && !savedRefundCardLast4) {
       await refundCardStorage.save(refundDigits);
       setSavedRefundCardLast4(refundDigits);
     }
@@ -699,6 +754,22 @@ export const SaleOrderScreen: React.FC = () => {
             </Box>
           ) : null}
 
+          {pos.isExchange ? (
+            <Box
+              bg={colors.warningSoft}
+              borderRadius="$lg"
+              px="$3"
+              py="$2"
+              mb="$3"
+              borderWidth={1}
+              borderColor={colors.warning}>
+              <Text size="sm" color={colors.warning} fontWeight="$bold">
+                Exchange — new items deduct stock, returned items restock. You'll{' '}
+                {isRefundDue ? 'refund' : 'collect'} the difference only.
+              </Text>
+            </Box>
+          ) : null}
+
           {pos.activeHoldSalesId ? (
             <Box
               bg={colors.warningSoft}
@@ -741,7 +812,7 @@ export const SaleOrderScreen: React.FC = () => {
           <View style={styles.cartPanel}>
             <View style={styles.cartPanelHeader}>
               <Text style={styles.cartPanelTitle}>
-                {pos.isReturn ? 'Items to return' : 'Cart'}
+                {pos.isReturn ? 'Items to return' : pos.isExchange ? 'Cart (sale + return)' : 'Cart'}
               </Text>
               <Text style={styles.cartPanelCount}>
                 {pos.cart.length} line{pos.cart.length === 1 ? '' : 's'}
@@ -771,9 +842,14 @@ export const SaleOrderScreen: React.FC = () => {
               const lineKey = cartLineKey(line.item_id, line.item_batch_id);
               const item = itemStockMap.get(line.item_id);
               const stock = item?.qty ?? 0;
+              // In Sale/Return modes every line matches the screen-wide mode already —
+              // in Exchange mode a line's own direction decides its treatment.
+              const lineIsReturn = pos.isExchange
+                ? line.line_direction === 'return'
+                : pos.isReturn;
               const outOfStock =
-                !pos.isReturn && !pos.allowNegativeInventory && stock <= 0;
-              const maxReturn = pos.isReturn
+                !lineIsReturn && !pos.allowNegativeInventory && stock <= 0;
+              const maxReturn = lineIsReturn
                 ? pos.getMaxReturnQty(line.item_id, line.item_batch_id ?? null)
                 : undefined;
               const lineTotalPreview = getLineTotalPreview(line);
@@ -793,7 +869,7 @@ export const SaleOrderScreen: React.FC = () => {
                   allowEditPrice
                   lineTotal={lineTotalPreview}
                   offerDiscount={offerLineDiscount}
-                  isReturn={pos.isReturn}
+                  isReturn={lineIsReturn}
                   allowNegativeInventory={pos.allowNegativeInventory}
                   maxReturn={maxReturn}
                   outOfStock={outOfStock}
@@ -904,8 +980,8 @@ export const SaleOrderScreen: React.FC = () => {
                   if (nextMode === discountMode) {
                     return;
                   }
-                  if (nextMode === 'percent' && previewSubTotal > 0) {
-                    const pct = round2((pos.discount / previewSubTotal) * 100);
+                  if (nextMode === 'percent' && previewDiscountBase > 0) {
+                    const pct = round2((pos.discount / previewDiscountBase) * 100);
                     setDiscountMode('percent');
                     setDiscountDraft(String(pct));
                     applyPosDiscount('percent', pct);
@@ -941,9 +1017,19 @@ export const SaleOrderScreen: React.FC = () => {
                 Subtotal
               </Text>
               <Text fontWeight="$semibold" color={colors.text}>
-                {formatCurrency(previewSubTotal, currency)}
+                {formatCurrency(pos.isExchange ? previewSaleSubTotal : previewSubTotal, currency)}
               </Text>
             </HStack>
+            {pos.isExchange && previewReturnSubTotal > 0 ? (
+              <HStack justifyContent="space-between" mb="$1">
+                <Text fontWeight="$semibold" color={colors.textSecondary}>
+                  Return credit
+                </Text>
+                <Text fontWeight="$semibold" color={colors.error}>
+                  -{formatCurrency(previewReturnSubTotal, currency)}
+                </Text>
+              </HStack>
+            ) : null}
             {!pos.isReturn && pos.offerDiscount > 0 ? (
               <HStack justifyContent="space-between" mb="$1">
                 <Text fontWeight="$semibold" color={colors.textSecondary}>
@@ -969,18 +1055,24 @@ export const SaleOrderScreen: React.FC = () => {
             ) : null}
             <HStack justifyContent="space-between">
               <Text fontWeight="$semibold" color={colors.textSecondary}>
-                {pos.discount > 0 || pos.offerDiscount > 0 ? 'Balance' : 'Total'}
+                {isRefundDue
+                  ? 'Refund due'
+                  : pos.discount > 0 || pos.offerDiscount > 0
+                    ? 'Balance'
+                    : 'Total'}
               </Text>
               <Text
                 fontSize="$xl"
                 fontWeight="$bold"
-                color={pos.isReturn ? colors.error : colors.primary}>
-                {formatCurrency(previewOrderTotal, currency)}
+                color={pos.isReturn || isRefundDue ? colors.error : colors.primary}>
+                {formatCurrency(Math.abs(previewOrderTotal), currency)}
               </Text>
             </HStack>
           </View>
 
-          {pos.isReturn ? (
+          {pos.isReturn ||
+          (pos.isExchange &&
+            (pos.returnSourceSale || pos.cart.some(l => l.line_direction === 'return'))) ? (
             <>
               <Text style={styles.sectionTitle}>Original sale</Text>
               <TextInput
@@ -991,7 +1083,7 @@ export const SaleOrderScreen: React.FC = () => {
                 placeholderTextColor={colors.textMuted}
                 editable={!pos.returnSourceSale}
               />
-              {refundCardReady && !savedRefundCardLast4 && !pos.returnFromCreditSale ? (
+              {needsRefundCardUi && refundCardReady && !savedRefundCardLast4 && !pos.returnFromCreditSale ? (
                 <>
                   <Text style={styles.sectionTitle}>Refund card last 4 digits</Text>
                   <Text style={styles.refundCardHint}>
@@ -1057,8 +1149,8 @@ export const SaleOrderScreen: React.FC = () => {
 
           <PaymentMethodDetails
             paymentMethod={paymentMethod}
-            isReturn={pos.isReturn}
-            netAmount={previewOrderTotal}
+            isReturn={pos.isReturn || isRefundDue}
+            netAmount={isRefundDue ? Math.abs(previewOrderTotal) : previewOrderTotal}
             currency={currency}
             amountReceived={amountReceived}
             onAmountReceivedChange={setAmountReceived}
@@ -1077,11 +1169,11 @@ export const SaleOrderScreen: React.FC = () => {
         </SmoothScrollView>
 
         <OrderCheckoutFooter
-          total={previewOrderTotal}
+          total={isRefundDue ? Math.abs(previewOrderTotal) : previewOrderTotal}
           currency={currency}
           paymentMethod={paymentMethod}
           showHold={showHoldFab}
-          isReturn={pos.isReturn}
+          isReturn={pos.isReturn || isRefundDue}
           onHold={showHoldFab ? handleHold : undefined}
           onPay={handlePay}
           holdLoading={holding}

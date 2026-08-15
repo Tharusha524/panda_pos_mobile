@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshControl, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { CompositeNavigationProp } from '@react-navigation/native';
@@ -22,16 +22,22 @@ import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { DashboardHomeHeader } from '@/components/dashboard/DashboardHomeHeader';
 import { SectionHeader } from '@/components/common/SectionHeader';
 import { DashboardPanel } from '@/components/common/DashboardPanel';
+import { LoadingOverlay } from '@/components/common/LoadingOverlay';
 import { DashboardHero } from '@/components/cards/DashboardHero';
 import { StatCard } from '@/components/cards/StatCard';
 import { QuickActionCard } from '@/components/cards/QuickActionCard';
-import { RecentTransactionRow } from '@/components/cards/RecentTransactionRow';
+import {
+  RecentTransactionRow,
+  type RecentTransaction,
+} from '@/components/cards/RecentTransactionRow';
 import { SalesChartCard } from '@/components/cards/SalesChartCard';
 import { useAppAlerts } from '@/context/AppAlertContext';
 import { useAuth } from '@/context/AuthContext';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { useDashboard } from '@/hooks/useDashboard';
+import { salesService } from '@/services/api/salesService';
+import { paymentService } from '@/services/api/paymentService';
 import { colors, TAB_BAR_SCROLL_PADDING } from '@/theme';
 import type { HomeStackParamList, MainTabParamList } from '@/navigation/types';
 
@@ -81,6 +87,7 @@ export const DashboardScreen: React.FC = () => {
     generatedAt,
   } = useDashboard();
 
+  const [receiptLoading, setReceiptLoading] = useState(false);
   const lastError = useRef<string | null>(null);
 
   useEffect(() => {
@@ -136,17 +143,44 @@ export const DashboardScreen: React.FC = () => {
     }
   };
 
-  const onTransactionPress = (type: string) => {
-    if (type === 'expense') {
-      navigation.navigate('ExpensesList');
-      return;
-    }
-    if (type === 'purchase') {
-      navigation.navigate('Products', { screen: 'PurchasesList' });
-      return;
-    }
-    navigation.navigate('Sales');
-  };
+  const onTransactionPress = useCallback(
+    async (item: RecentTransaction) => {
+      if (item.type === 'expense') {
+        navigation.navigate('ExpensesList');
+        return;
+      }
+      if (item.type === 'purchase') {
+        navigation.navigate('Products', { screen: 'PurchasesList' });
+        return;
+      }
+      if (item.type === 'sale' || item.type === 'return') {
+        setReceiptLoading(true);
+        try {
+          const receipt = await salesService.getReceipt(item.rawId);
+          navigation.navigate('CustomerSaleReceipt', { receipt });
+        } catch (e) {
+          showErrorFromUnknown(e, 'Receipt unavailable');
+        } finally {
+          setReceiptLoading(false);
+        }
+        return;
+      }
+      if (item.type === 'payment') {
+        setReceiptLoading(true);
+        try {
+          const payment = await paymentService.getPayment(item.rawId);
+          navigation.navigate('PaymentDetailReceipt', { payment });
+        } catch (e) {
+          showErrorFromUnknown(e, 'Receipt unavailable');
+        } finally {
+          setReceiptLoading(false);
+        }
+        return;
+      }
+      navigation.navigate('Sales');
+    },
+    [navigation, showErrorFromUnknown],
+  );
 
   const heroHint =
     revenueHint ??
@@ -155,6 +189,7 @@ export const DashboardScreen: React.FC = () => {
 
   return (
     <ScreenContainer enableTabSwipe>
+      {receiptLoading ? <LoadingOverlay message="Loading receipt…" /> : null}
       <DashboardHomeHeader
         userName={user?.name}
         alertCount={unreadCount}
@@ -358,7 +393,7 @@ export const DashboardScreen: React.FC = () => {
                   key={item.id}
                   item={item}
                   isLast={index === arr.length - 1}
-                  onPress={() => onTransactionPress(item.type)}
+                  onPress={() => onTransactionPress(item)}
                 />
               ))}
             </View>

@@ -7,7 +7,7 @@ import { formatCurrency, resolveCurrencyCode, parseBackendTimestamp } from '@/ut
 import { colors } from '@/theme';
 import type { SystemReportPayload } from '@/types/reports';
 import type { PosMobileSettings } from '@/types/settings';
-import { TRANSACTION_TYPE_RETURN } from '@/types/sales';
+import { TRANSACTION_TYPE_EXCHANGE, TRANSACTION_TYPE_RETURN } from '@/types/sales';
 
 interface SystemReportViewProps {
   report: SystemReportPayload;
@@ -135,6 +135,9 @@ export const SystemReportView: React.FC<SystemReportViewProps> = ({
 
     return rows.map(row => {
       const isReturn = row.transaction_type === TRANSACTION_TYPE_RETURN;
+      const isExchange = row.transaction_type === TRANSACTION_TYPE_EXCHANGE;
+      const isRefundDue = isExchange && row.amount < 0;
+      const showAsReturn = isReturn || isRefundDue;
       return (
         <View key={`${row.id}-${row.sales_id}`} style={styles.rowCard}>
           <HStack justifyContent="space-between" alignItems="flex-start">
@@ -148,11 +151,11 @@ export const SystemReportView: React.FC<SystemReportViewProps> = ({
               </Text>
             </VStack>
             <VStack alignItems="flex-end">
-              <Text style={[styles.rowAmount, bodyText(13), isReturn && { color: colors.error }]}>
-                {formatCurrency(row.amount, currency)}
+              <Text style={[styles.rowAmount, bodyText(13), showAsReturn && { color: colors.error }]}>
+                {formatCurrency(Math.abs(row.amount), currency)}
               </Text>
-              <Text style={[styles.rowBadge, bodyText(10), isReturn && styles.rowBadgeReturn]}>
-                {isReturn ? 'Return' : 'Sale'}
+              <Text style={[styles.rowBadge, bodyText(10), showAsReturn && styles.rowBadgeReturn]}>
+                {isExchange ? 'Exchange' : isReturn ? 'Return' : 'Sale'}
               </Text>
             </VStack>
           </HStack>

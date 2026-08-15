@@ -26,6 +26,7 @@ const mapTransactions = (
 ): RecentTransaction[] =>
   items.map(tx => ({
     id: `${tx.type}-${tx.id}`,
+    rawId: tx.id,
     type: tx.type === 'return' ? 'return' : tx.type,
     title: tx.party?.trim() || tx.reference || 'Transaction',
     reference: tx.reference ?? undefined,

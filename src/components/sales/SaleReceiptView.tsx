@@ -77,10 +77,37 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
   })}`;
 
   const isHold = Boolean(sale.is_hold || sale.order_status === 'hold');
+  const isRefundDue = Boolean(sale.is_exchange) && sale.net_amount < 0;
   const invoiceTitle = getSaleReceiptTitle({
     isHold,
     isReturn: Boolean(sale.is_return),
   });
+  const saleLines = sale.lines.filter(line => line.line_direction !== 'return');
+  const returnLines = sale.lines.filter(line => line.line_direction === 'return');
+  const hasReturnLines = returnLines.length > 0;
+  const renderLine = (line: (typeof sale.lines)[number], idx: number) => {
+    const uom = resolveLineUom(line.uom);
+    const isReturnLine = line.line_direction === 'return';
+    return (
+      <View key={`${line.item_number}-${idx}`} style={styles.lineRow}>
+        <VStack style={styles.colItem} flex={1}>
+          <Text style={[styles.lineDesc, bodyText(13)]}>{line.description}</Text>
+          <Text style={[styles.lineSub, bodyText(11)]}>
+            {formatReceiptQtyDetail(
+              line.qty,
+              formatCurrency(line.unit_price, currency),
+              uom,
+            )}
+          </Text>
+        </VStack>
+        <Text style={[styles.lineQty, styles.colQty, bodyText(11)]}>{`${line.qty} ${uom}`}</Text>
+        <Text style={[styles.lineAmt, styles.colAmt, bodyText(13)]}>
+          {isReturnLine ? '-' : ''}
+          {formatCurrency(line.line_total, currency)}
+        </Text>
+      </View>
+    );
+  };
 
   const discountLabel = (() => {
     const base = sale.discount_label ?? 'Discount';
@@ -89,9 +116,12 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
     }
     return base;
   })();
+  // Refund-due exchanges store a signed (negative) net_amount — show the positive
+  // magnitude everywhere on the receipt, matching how it's collected at checkout.
+  const displayNetAmount = isRefundDue ? Math.abs(sale.net_amount) : sale.net_amount;
   const change =
     !isHold && sale.amount_received != null
-      ? sale.amount_received - sale.net_amount
+      ? sale.amount_received - displayNetAmount
       : null;
   const customerInfoRows = [
     { label: 'Customer', value: sale.customer_name },
@@ -135,7 +165,11 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
         style={[
           styles.invoiceTitle,
           bodyText(14),
-          sale.is_return ? { color: colors.error } : isHold ? { color: colors.warning } : undefined,
+          sale.is_return
+            ? { color: colors.error }
+            : isHold
+              ? { color: colors.warning }
+              : undefined,
         ]}>
         {invoiceTitle}
       </Text>
@@ -145,7 +179,13 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
         </Text>
       ) : null}
       <Text style={[styles.mutedCenter, bodyText(12)]}>
-        {sale.is_return ? 'Return No' : isHold ? 'Hold No' : 'Bill No'}: {sale.sales_id}
+        {sale.is_return
+          ? 'Return No'
+          : sale.is_exchange
+            ? 'Exchange No'
+            : isHold
+              ? 'Hold No'
+              : 'Bill No'}: {sale.sales_id}
       </Text>
       <Text style={[styles.mutedCenter, bodyText(12)]}>
         All amounts in {getCurrencyLabel(currency)}
@@ -180,35 +220,39 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
         </>
       ) : null}
 
-      <View style={styles.tableHead}>
-        <Text style={[styles.th, styles.colItem, bodyText(11)]}>Item</Text>
-        <Text style={[styles.th, styles.colQty, bodyText(11)]}>Qty</Text>
-        <Text style={[styles.th, styles.colAmt, bodyText(11)]}>Amount</Text>
-      </View>
-      <View style={[styles.dividerThin, dividerOverride]} />
+      {hasReturnLines ? (
+        <>
+          <Text style={[styles.sectionLabel, bodyText(11)]}>SOLD ITEMS</Text>
+          <View style={styles.tableHead}>
+            <Text style={[styles.th, styles.colItem, bodyText(11)]}>Item</Text>
+            <Text style={[styles.th, styles.colQty, bodyText(11)]}>Qty</Text>
+            <Text style={[styles.th, styles.colAmt, bodyText(11)]}>Amount</Text>
+          </View>
+          <View style={[styles.dividerThin, dividerOverride]} />
+          {saleLines.map((line, idx) => renderLine(line, idx))}
 
-      {sale.lines.map((line, idx) => {
-        const uom = resolveLineUom(line.uom);
-        return (
-        <View key={`${line.item_number}-${idx}`} style={styles.lineRow}>
-          <VStack style={styles.colItem} flex={1}>
-            <Text style={[styles.lineDesc, bodyText(13)]}>{line.description}</Text>
-            <Text style={[styles.lineSub, bodyText(11)]}>
-              {line.item_number ? `ID ${line.item_number} · ` : ''}
-              {formatReceiptQtyDetail(
-                line.qty,
-                formatCurrency(line.unit_price, currency),
-                uom,
-              )}
-            </Text>
-          </VStack>
-          <Text style={[styles.lineQty, styles.colQty, bodyText(11)]}>{`${line.qty} ${uom}`}</Text>
-          <Text style={[styles.lineAmt, styles.colAmt, bodyText(13)]}>
-            {formatCurrency(line.line_total, currency)}
+          <Text style={[styles.sectionLabel, styles.sectionLabelReturn, bodyText(11)]}>
+            RETURNED ITEMS
           </Text>
-        </View>
-        );
-      })}
+          <View style={styles.tableHead}>
+            <Text style={[styles.th, styles.colItem, bodyText(11)]}>Item</Text>
+            <Text style={[styles.th, styles.colQty, bodyText(11)]}>Qty</Text>
+            <Text style={[styles.th, styles.colAmt, bodyText(11)]}>Amount</Text>
+          </View>
+          <View style={[styles.dividerThin, dividerOverride]} />
+          {returnLines.map((line, idx) => renderLine(line, idx))}
+        </>
+      ) : (
+        <>
+          <View style={styles.tableHead}>
+            <Text style={[styles.th, styles.colItem, bodyText(11)]}>Item</Text>
+            <Text style={[styles.th, styles.colQty, bodyText(11)]}>Qty</Text>
+            <Text style={[styles.th, styles.colAmt, bodyText(11)]}>Amount</Text>
+          </View>
+          <View style={[styles.dividerThin, dividerOverride]} />
+          {sale.lines.map((line, idx) => renderLine(line, idx))}
+        </>
+      )}
 
       <View style={[styles.divider, dividerOverride]} />
 
@@ -217,6 +261,13 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
         value={formatCurrency(sale.sub_total, currency)}
         textStyle={bodyText(13)}
       />
+      {(sale.return_sub_total ?? 0) > 0 ? (
+        <TotalRow
+          label="Return credit"
+          value={`-${formatCurrency(sale.return_sub_total ?? 0, currency)}`}
+          textStyle={bodyText(13)}
+        />
+      ) : null}
       {sale.discount > 0 ? (
         <TotalRow
           label={discountLabel}
@@ -233,10 +284,16 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
       ) : null}
       <View style={styles.grandRow}>
         <Text style={[styles.grandLabel, bodyTextSizeOnly(16)]}>
-          {isHold ? 'AMOUNT DUE' : sale.discount > 0 ? 'BALANCE' : 'TOTAL'}
+          {isHold
+            ? 'AMOUNT DUE'
+            : isRefundDue
+              ? 'REFUND DUE'
+              : sale.discount > 0
+                ? 'BALANCE'
+                : 'TOTAL'}
         </Text>
         <Text style={[styles.grandValue, bodyTextSizeOnly(16)]}>
-          {formatCurrency(sale.net_amount, currency)}
+          {formatCurrency(displayNetAmount, currency)}
         </Text>
       </View>
       {!isHold && sale.amount_received != null ? (
@@ -376,6 +433,17 @@ const styles = StyleSheet.create({
   partyBlock: {
     marginTop: 4,
     marginBottom: 8,
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.text,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginTop: 8,
+  },
+  sectionLabelReturn: {
+    marginTop: 12,
   },
   tableHead: {
     flexDirection: 'row',

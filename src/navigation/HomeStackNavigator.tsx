@@ -11,6 +11,7 @@ import { CustomerReceivePaymentScreen } from '@/screens/customers/CustomerReceiv
 import { CustomerHistoryScreen } from '@/screens/customers/CustomerHistoryScreen';
 import { CustomerSaleReceiptScreen } from '@/screens/customers/CustomerSaleReceiptScreen';
 import { PaymentReceiptScreen } from '@/screens/customers/PaymentReceiptScreen';
+import { PaymentDetailReceiptScreen } from '@/screens/customers/PaymentDetailReceiptScreen';
 import type { HomeStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<HomeStackParamList>();
@@ -36,6 +37,7 @@ export const HomeStackNavigator: React.FC = () => (
     <Stack.Screen name="CustomerHistory" component={CustomerHistoryScreen} />
     <Stack.Screen name="CustomerSaleReceipt" component={CustomerSaleReceiptScreen} />
     <Stack.Screen name="PaymentReceipt" component={PaymentReceiptScreen} />
+    <Stack.Screen name="PaymentDetailReceipt" component={PaymentDetailReceiptScreen} />
     <Stack.Screen name="ExpensesList" component={ExpensesScreen} />
     <Stack.Screen name="ExpenseForm" component={ExpenseFormScreen} />
   </Stack.Navigator>

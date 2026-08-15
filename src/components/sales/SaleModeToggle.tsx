@@ -1,5 +1,5 @@
 import React from 'react';
-import { RotateCcw, ShoppingCart } from 'lucide-react-native';
+import { Repeat, RotateCcw, ShoppingCart } from 'lucide-react-native';
 import { PaperSegmentFilter } from '@/components/common/PaperSegmentFilter';
 import { colors } from '@/theme';
 import type { SaleTransactionMode } from '@/types/sales';
@@ -22,6 +22,12 @@ const SALE_MODE_OPTIONS = [
     label: 'Return',
     Icon: RotateCcw,
     checkedColor: colors.text,
+  },
+  {
+    value: 'exchange' as const,
+    label: 'Exchange',
+    Icon: Repeat,
+    checkedColor: colors.warning,
   },
 ];
 

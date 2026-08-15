@@ -29,6 +29,7 @@ import type {
   SaleTransactionMode,
 } from '@/types/sales';
 import {
+  TRANSACTION_TYPE_EXCHANGE,
   TRANSACTION_TYPE_RETURN,
   TRANSACTION_TYPE_SALE,
 } from '@/types/sales';
@@ -131,13 +132,14 @@ export const usePosSale = () => {
   const [batchItemIds, setBatchItemIds] = useState<Set<number>>(() => new Set());
 
   const isReturn = transactionMode === 'return';
+  const isExchange = transactionMode === 'exchange';
 
   const returnFromCreditSale = useMemo(
     () =>
-      isReturn &&
+      (isReturn || isExchange) &&
       returnSourceSale != null &&
       isCreditPayment(returnSourceSale.payment_method ?? ''),
-    [isReturn, returnSourceSale],
+    [isExchange, isReturn, returnSourceSale],
   );
 
   const locations = context?.filters.locations ?? [];
@@ -146,12 +148,20 @@ export const usePosSale = () => {
   const branchLocation = location || defaultLocation(locations);
 
   const fetchReturnedQtyByOriginalSale = useCallback(async (): Promise<ReturnedQtyByOriginalSale> => {
-    const { sales } = await salesService.listSales({
-      transaction_type: TRANSACTION_TYPE_RETURN,
-      location: branchLocation || undefined,
-    });
+    const [{ sales: returns }, { sales: exchanges }] = await Promise.all([
+      salesService.listSales({
+        transaction_type: TRANSACTION_TYPE_RETURN,
+        location: branchLocation || undefined,
+      }),
+      salesService.listSales({
+        transaction_type: TRANSACTION_TYPE_EXCHANGE,
+        location: branchLocation || undefined,
+      }),
+    ]);
     return buildReturnedQtyByOriginalSale(
-      sales.filter(s => s.order_status === 'completed' || !s.order_status),
+      [...returns, ...exchanges].filter(
+        s => s.order_status === 'completed' || !s.order_status,
+      ),
     );
   }, [branchLocation]);
 
@@ -436,8 +446,11 @@ export const usePosSale = () => {
       const ids = new Set(
         variantIdsForDisplayItem(displayItem, variantsByItemNumberRef.current),
       );
+      // Only count sale-direction lines — in Exchange mode the same item can
+      // also appear as a returned line, which shouldn't inflate this count
+      // (a no-op filter in Sale/Return modes, where every line is one direction).
       return cart
-        .filter(line => ids.has(line.item_id))
+        .filter(line => ids.has(line.item_id) && (line.line_direction ?? 'sale') !== 'return')
         .reduce((sum, line) => sum + line.qty, 0);
     },
     [cart],
@@ -622,14 +635,23 @@ export const usePosSale = () => {
     returnSourceSale,
   ]);
 
-  const addToCart = useCallback((item: InventoryItem, qty = 1, batch?: ItemBatch | null) => {
+  const addToCart = useCallback((
+    item: InventoryItem,
+    qty = 1,
+    batch?: ItemBatch | null,
+    direction: 'sale' | 'return' = 'sale',
+  ) => {
     const batchId = batch?.id ?? null;
     setCart(prev => {
       // Route/customer for a brand-new sale are now decided up front by the
       // start-sale gate (see routeLocked) — don't clobber that pick here.
+      // Direction is part of the match key so an Exchange cart can hold both a
+      // sold line and a returned line for the same item/batch without merging.
       const existing = prev.find(
         line =>
-          line.item_id === item.id && (line.item_batch_id ?? null) === batchId,
+          line.item_id === item.id &&
+          (line.item_batch_id ?? null) === batchId &&
+          (line.line_direction ?? 'sale') === direction,
       );
       const unitPrice = batch
         ? batchSellingPrice(batch, item.selling_price, item.wholesale_price)
@@ -641,7 +663,9 @@ export const usePosSale = () => {
       if (existing) {
         const nextQty = existing.qty + qty;
         return prev.map(line =>
-          line.item_id === item.id && (line.item_batch_id ?? null) === batchId
+          line.item_id === item.id &&
+          (line.item_batch_id ?? null) === batchId &&
+          (line.line_direction ?? 'sale') === direction
             ? {
                 ...line,
                 qty: nextQty,
@@ -667,10 +691,11 @@ export const usePosSale = () => {
           batch_number: batch?.batch_number ?? null,
           batch_expiry_date: batch?.expiry_date ?? null,
           inventory_location: item.location?.trim() || null,
+          line_direction: direction,
         },
       ];
     });
-  }, [isReturn]);
+  }, []);
 
   const removeFromCart = useCallback((itemId: number, itemBatchId?: number | null) => {
     if (itemBatchId === undefined) {
@@ -748,7 +773,7 @@ export const usePosSale = () => {
           return false;
         }
         const returnBatch = resolveReturnBatch(displayItem);
-        addToCart(displayItem, qty, returnBatch);
+        addToCart(displayItem, qty, returnBatch, 'return');
         return true;
       }
 
@@ -773,6 +798,118 @@ export const usePosSale = () => {
       return true;
     },
     [addToCart, canSellItem, isReturn, openBatchPicker, resolveReturnBatch, resolveSaleItem],
+  );
+
+  /**
+   * Exchange mode only — adds a returned item to the cart as a 'return'-direction
+   * line, independent of tryAddToCart (which always adds 'sale'-direction lines
+   * from the main product grid). Additive: does not touch canSellItem/tryAddToCart.
+   */
+  const tryAddReturnLineToCart = useCallback(
+    (displayItem: InventoryItem, qty = 1): boolean => {
+      if (!returnSourceSale) {
+        setError('Pick the original bill before adding return items');
+        return false;
+      }
+      const batchId = displayItem.sale_line_batch_id ?? null;
+      const max = getMaxReturnQty(displayItem.id, batchId);
+      if (max <= 0) {
+        setError('This item was not on the original sale');
+        return false;
+      }
+      const inCart = cart
+        .filter(
+          line =>
+            line.item_id === displayItem.id &&
+            (line.item_batch_id ?? null) === batchId &&
+            line.line_direction === 'return',
+        )
+        .reduce((sum, line) => sum + line.qty, 0);
+      if (inCart + qty > max) {
+        setError(`Only ${max} remaining on bill ${returnSourceSale.sales_id}`);
+        return false;
+      }
+      const returnBatch = resolveReturnBatch(displayItem);
+      addToCart(displayItem, qty, returnBatch, 'return');
+      return true;
+    },
+    [addToCart, cart, getMaxReturnQty, resolveReturnBatch, returnSourceSale],
+  );
+
+  /** Exchange mode only — current qty of a return-direction line, for the return-items strip's stepper. */
+  const getReturnCartQty = useCallback(
+    (itemId: number, itemBatchId?: number | null) => {
+      const batchId = itemBatchId ?? null;
+      return (
+        cart.find(
+          line =>
+            line.item_id === itemId &&
+            (line.item_batch_id ?? null) === batchId &&
+            line.line_direction === 'return',
+        )?.qty ?? 0
+      );
+    },
+    [cart],
+  );
+
+  /** Exchange mode only — steps a return-direction line down by 1 (removes it at 0). Additive: leaves decrementCartQty/removeFromCart untouched, which don't distinguish direction. */
+  const decrementReturnLineInCart = useCallback(
+    (itemId: number, itemBatchId?: number | null) => {
+      const batchId = itemBatchId ?? null;
+      setCart(prev => {
+        const line = prev.find(
+          l =>
+            l.item_id === itemId &&
+            (l.item_batch_id ?? null) === batchId &&
+            l.line_direction === 'return',
+        );
+        if (!line) {
+          return prev;
+        }
+        const nextQty = round2(line.qty - 1);
+        if (nextQty <= 0) {
+          return prev.filter(l => l !== line);
+        }
+        return prev.map(l =>
+          l === line
+            ? { ...l, qty: nextQty, line_total: round2(nextQty * l.unit_price) }
+            : l,
+        );
+      });
+    },
+    [],
+  );
+
+  /** Exchange mode only — sets a return-direction line to an exact qty (manual entry), clamped to remaining returnable qty. Removes the line at 0. */
+  const setReturnLineQty = useCallback(
+    (itemId: number, itemBatchId: number | null | undefined, qty: number) => {
+      const batchId = itemBatchId ?? null;
+      const max = getMaxReturnQty(itemId, batchId);
+      const clamped = Math.max(0, Math.min(round2(qty), max));
+      if (qty > max) {
+        setError(`Only ${max} remaining on this bill`);
+      }
+      setCart(prev => {
+        const line = prev.find(
+          l =>
+            l.item_id === itemId &&
+            (l.item_batch_id ?? null) === batchId &&
+            l.line_direction === 'return',
+        );
+        if (!line) {
+          return prev;
+        }
+        if (clamped <= 0) {
+          return prev.filter(l => l !== line);
+        }
+        return prev.map(l =>
+          l === line
+            ? { ...l, qty: clamped, line_total: round2(clamped * l.unit_price) }
+            : l,
+        );
+      });
+    },
+    [getMaxReturnQty],
   );
 
   const addMainFromBatchPicker = useCallback(
@@ -1145,29 +1282,56 @@ export const usePosSale = () => {
     [cart],
   );
 
+  /** Exchange mode only — sale-direction lines total (what the new items cost). */
+  const saleSubTotal = useMemo(
+    () =>
+      round2(
+        cart
+          .filter(l => l.line_direction !== 'return')
+          .reduce((sum, l) => sum + l.line_total, 0),
+      ),
+    [cart],
+  );
+
+  /** Exchange mode only — return-direction lines total (credit given back). */
+  const returnSubTotal = useMemo(
+    () =>
+      round2(
+        cart
+          .filter(l => l.line_direction === 'return')
+          .reduce((sum, l) => sum + l.line_total, 0),
+      ),
+    [cart],
+  );
+
   const offerDiscount = offerPreview?.offer_discount ?? 0;
   const offerAdjustedSubTotal = offerPreview?.sub_total ?? subTotal;
 
+  const discountBaseTotal = isExchange ? saleSubTotal : subTotal;
+
   /** Manual cashier discount — separate from automatic product/order offers. */
   const discount = useMemo(
-    () => computeDiscountAmount(subTotal, orderDiscountType, orderDiscountInput),
-    [orderDiscountType, orderDiscountInput, subTotal],
+    () => computeDiscountAmount(discountBaseTotal, orderDiscountType, orderDiscountInput),
+    [discountBaseTotal, orderDiscountType, orderDiscountInput],
   );
 
   const discountPercent = useMemo(() => {
     if (orderDiscountType === 'percent') {
       return round2(Math.min(100, Math.max(0, orderDiscountInput)));
     }
-    if (subTotal <= 0) {
+    if (discountBaseTotal <= 0) {
       return 0;
     }
-    return round2((discount / subTotal) * 100);
-  }, [discount, orderDiscountInput, orderDiscountType, subTotal]);
+    return round2((discount / discountBaseTotal) * 100);
+  }, [discount, discountBaseTotal, orderDiscountInput, orderDiscountType]);
 
-  const netAmount = useMemo(
-    () => round2(Math.max(0, subTotal - discount - offerDiscount)),
-    [discount, offerDiscount, subTotal],
-  );
+  const netAmount = useMemo(() => {
+    if (isExchange) {
+      // Signed — a refund is due when returned value exceeds the new sale value.
+      return round2(saleSubTotal - discount - offerDiscount - returnSubTotal);
+    }
+    return round2(Math.max(0, subTotal - discount - offerDiscount));
+  }, [isExchange, saleSubTotal, returnSubTotal, discount, offerDiscount, subTotal]);
 
   const clearHoldSession = useCallback(() => {
     setActiveHoldId(null);
@@ -1743,8 +1907,20 @@ export const usePosSale = () => {
       payment.cart && payment.cart.length > 0 ? payment.cart : cart;
     const { location: stockLocation, lines: saleLines } =
       prepareCheckout(checkoutCart);
+    const checkoutSaleLines = saleLines.filter(
+      line => line.line_direction !== 'return',
+    );
+    const checkoutReturnLines = saleLines.filter(
+      line => line.line_direction === 'return',
+    );
     const checkoutSubTotal = round2(
-      saleLines.reduce((sum, line) => sum + line.line_total, 0),
+      (isExchange ? checkoutSaleLines : saleLines).reduce(
+        (sum, line) => sum + line.line_total,
+        0,
+      ),
+    );
+    const checkoutReturnSubTotal = round2(
+      checkoutReturnLines.reduce((sum, line) => sum + line.line_total, 0),
     );
     const checkoutDiscount = computeDiscountAmount(
       checkoutSubTotal,
@@ -1752,16 +1928,20 @@ export const usePosSale = () => {
       orderDiscountInput,
     );
     let checkoutOfferDiscount = offerDiscount;
-    let checkoutNet = round2(
-      Math.max(0, checkoutSubTotal - checkoutDiscount - checkoutOfferDiscount),
-    );
+    let checkoutNet = isExchange
+      ? round2(checkoutSubTotal - checkoutDiscount - checkoutOfferDiscount - checkoutReturnSubTotal)
+      : round2(Math.max(0, checkoutSubTotal - checkoutDiscount - checkoutOfferDiscount));
 
     if (checkoutCart.length === 0) {
       setError('Add at least one item to the cart');
       return null;
     }
-    if (!isReturn && cartHasStockIssuesFor(saleLines)) {
+    if (!isReturn && cartHasStockIssuesFor(isExchange ? checkoutSaleLines : saleLines)) {
       setError('Remove out-of-stock items from the cart before payment');
+      return null;
+    }
+    if (isExchange && checkoutReturnLines.length > 0 && !returnSourceSale) {
+      setError('Pick the original bill before adding return items');
       return null;
     }
     if (checkoutDiscount > checkoutSubTotal) {
@@ -1802,7 +1982,6 @@ export const usePosSale = () => {
       return null;
     }
     if (
-      isReturn &&
       returnFromCreditSale &&
       (isWalkIn ||
         (returnSourceSale?.customer_id != null &&
@@ -1828,13 +2007,13 @@ export const usePosSale = () => {
       ) {
         const preview = await offerService.preview({
           offerId: selectedOfferId,
-          lines: saleLines,
+          lines: isExchange ? checkoutSaleLines : saleLines,
           promoCode: offerPromoCode,
         });
         checkoutOfferDiscount = preview.offer_discount;
-        checkoutNet = round2(
-          Math.max(0, checkoutSubTotal - checkoutDiscount - checkoutOfferDiscount),
-        );
+        checkoutNet = isExchange
+          ? round2(checkoutSubTotal - checkoutDiscount - checkoutOfferDiscount - checkoutReturnSubTotal)
+          : round2(Math.max(0, checkoutSubTotal - checkoutDiscount - checkoutOfferDiscount));
       } else if (
         !isReturn &&
         allowOffer &&
@@ -1850,7 +2029,7 @@ export const usePosSale = () => {
         returnSourceSale?.sales_id?.trim() ||
         null;
 
-      const notes = isReturn
+      const notes = isReturn || isExchange
         ? [
             originalBill ? `Return for ${originalBill}` : 'Walk-in return',
             payment.notes?.trim(),
@@ -1860,13 +2039,18 @@ export const usePosSale = () => {
         : payment.notes?.trim() || null;
 
       const salePayload = attachOfferToPayload({
-        transaction_type: isReturn ? TRANSACTION_TYPE_RETURN : TRANSACTION_TYPE_SALE,
-        sales_type: isReturn ? 'Return' : 'Retail',
+        transaction_type: isExchange
+          ? TRANSACTION_TYPE_EXCHANGE
+          : isReturn
+            ? TRANSACTION_TYPE_RETURN
+            : TRANSACTION_TYPE_SALE,
+        sales_type: isExchange ? 'Exchange' : isReturn ? 'Return' : 'Retail',
         sales_id: activeHoldSalesId ?? salesId,
         location: stockLocation,
         customer_id: isWalkIn ? null : activeCustomer.id,
         customer_name: activeCustomer.customer_name,
         sub_total: checkoutSubTotal,
+        return_sub_total: isExchange ? checkoutReturnSubTotal : undefined,
         discount: checkoutDiscount,
         net_amount: checkoutNet,
         payment_method: resolvedPaymentMethod,
@@ -1876,12 +2060,12 @@ export const usePosSale = () => {
         notes,
         items: saleLines,
         order_status: 'completed',
-        ...(isReturn && returnSourceSale?.id
+        ...((isReturn || isExchange) && returnSourceSale?.id
           ? { returned_from_sale_id: returnSourceSale.id }
           : {}),
       });
 
-      if (isReturn && payment.refund_card_last4) {
+      if ((isReturn || isExchange) && payment.refund_card_last4) {
         salePayload.refund_card_last4 = payment.refund_card_last4;
       }
 
@@ -1950,6 +2134,7 @@ export const usePosSale = () => {
       selectedOffer,
       selectedOfferId,
       isReturn,
+      isExchange,
     ],
   );
 
@@ -1957,10 +2142,12 @@ export const usePosSale = () => {
     setReturnSourceSale(null);
     setReturnWithoutBill(false);
     setRemainingReturnQtyByLineKey(new Map());
-    setCart([]);
+    // In Exchange mode, dropping the return source only makes the return lines
+    // meaningless — keep whatever new-sale items the cashier already added.
+    setCart(prev => (isExchange ? prev.filter(l => l.line_direction !== 'return') : []));
     setSearchQuery('');
     setError(null);
-  }, []);
+  }, [isExchange]);
 
   const startReturnWithoutBill = useCallback(() => {
     setReturnSourceSale(null);
@@ -1977,8 +2164,11 @@ export const usePosSale = () => {
       setError(null);
       try {
         const sale = await salesService.getSale(saleId);
-        if (sale.transaction_type === TRANSACTION_TYPE_RETURN) {
-          throw new Error('Cannot return from another return bill');
+        if (
+          sale.transaction_type === TRANSACTION_TYPE_RETURN ||
+          sale.transaction_type === TRANSACTION_TYPE_EXCHANGE
+        ) {
+          throw new Error('Cannot return items from a return or exchange bill');
         }
         if (sale.order_status && sale.order_status !== 'completed') {
           throw new Error('Only completed sales can be returned');
@@ -1998,7 +2188,9 @@ export const usePosSale = () => {
         setRemainingReturnQtyByLineKey(remaining);
         setReturnSourceSale(sale);
         setReturnWithoutBill(false);
-        setCart([]);
+        // Exchange mode: keep the new-sale items already in the cart — only
+        // Return mode starts a fresh cart when a source bill is picked.
+        setCart(prev => (isExchange ? prev : []));
         setSearchQuery('');
         if (sale.customer_id) {
           try {
@@ -2024,7 +2216,7 @@ export const usePosSale = () => {
         setLoadingReturnSale(false);
       }
     },
-    [fetchReturnedQtyByOriginalSale, paymentMethods],
+    [fetchReturnedQtyByOriginalSale, isExchange, paymentMethods],
   );
 
   const findAndLoadReturnSale = useCallback(
@@ -2088,8 +2280,8 @@ export const usePosSale = () => {
     setSearchQuery('');
     setError(null);
     clearOffer();
-    if (mode === 'sale') {
-      // Fresh cart in sale mode — show the route/customer gate again.
+    if (mode === 'sale' || mode === 'exchange') {
+      // Fresh cart in sale/exchange mode — show the route/customer gate again.
       setRouteLocked(false);
     }
   }, [clearOffer]);
@@ -2164,6 +2356,8 @@ export const usePosSale = () => {
     amountReceived,
     setAmountReceived,
     subTotal,
+    saleSubTotal,
+    returnSubTotal,
     discount,
     discountPercent,
     applyOrderDiscount,
@@ -2207,6 +2401,7 @@ export const usePosSale = () => {
     needsCategoryPick: false,
     transactionMode,
     isReturn,
+    isExchange,
     returnFromCreditSale,
     switchTransactionMode,
     returnSourceSale,
@@ -2220,5 +2415,10 @@ export const usePosSale = () => {
     clearReturnSource,
     startReturnWithoutBill,
     getMaxReturnQty,
+    tryAddReturnLineToCart,
+    returnDisplayItems,
+    getReturnCartQty,
+    decrementReturnLineInCart,
+    setReturnLineQty,
   };
 };

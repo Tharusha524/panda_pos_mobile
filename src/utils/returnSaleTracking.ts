@@ -49,6 +49,12 @@ export function buildReturnedQtyByOriginalSale(
       if (!line.item_id || line.qty <= 0) {
         continue;
       }
+      // An Exchange bill mixes new-sale lines with returned lines — only the
+      // return-direction ones were actually taken back from the original bill.
+      // Plain Return bills have every line as 'return' (or untagged, treated the same).
+      if (line.line_direction === 'sale') {
+        continue;
+      }
       const lineKey = saleReturnLineKey(line.item_id, line.item_batch_id);
       lineMap.set(lineKey, round2((lineMap.get(lineKey) ?? 0) + line.qty));
     }

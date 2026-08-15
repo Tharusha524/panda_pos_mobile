@@ -12,7 +12,7 @@ import {
   escTitleLine,
   type ReceiptLayoutContext,
 } from '@/utils/receiptEscPosLayout';
-import { TRANSACTION_TYPE_RETURN } from '@/types/sales';
+import { TRANSACTION_TYPE_EXCHANGE, TRANSACTION_TYPE_RETURN } from '@/types/sales';
 
 export type BuildReportEscPosOptions = {
   currency?: string | null;
@@ -223,7 +223,8 @@ const buildSalesReport = (
 
   for (const row of rows) {
     const isReturn = row.transaction_type === TRANSACTION_TYPE_RETURN;
-    const label = isReturn ? `RET ${row.sales_id}` : row.sales_id;
+    const isExchange = row.transaction_type === TRANSACTION_TYPE_EXCHANGE;
+    const label = isReturn ? `RET ${row.sales_id}` : isExchange ? `EXC ${row.sales_id}` : row.sales_id;
     lines.push(escLine(ctx, wrapText(ctx, label)));
     const detail = [
       row.customer_name ? wrapText(ctx, row.customer_name) : null,
@@ -238,7 +239,7 @@ const buildSalesReport = (
     lines.push(
       escPadLine(
         ctx,
-        isReturn ? 'Return' : 'Sale',
+        isReturn ? 'Return' : isExchange ? 'Exchange' : 'Sale',
         formatPrintAmount(row.amount, code),
       ),
     );
