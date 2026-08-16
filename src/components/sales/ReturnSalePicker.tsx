@@ -47,11 +47,38 @@ export const ReturnSalePicker: React.FC<ReturnSalePickerProps> = ({
   }, [pos]);
 
   const lookupBill = async () => {
+    const q = billQuery.trim();
+    if (!q) {
+      return;
+    }
     try {
-      await pos.findAndLoadReturnSale(billQuery);
+      await pos.findAndLoadReturnSale(q);
       setBillQuery('');
+      return;
     } catch {
-      /* error shown via pos.error */
+      /* No exact bill-number match — fall back to a customer-name search below. */
+    }
+
+    setLoadingList(true);
+    try {
+      const rows = await pos.loadSalesBillsForReturn();
+      const nameMatches = rows.filter(s =>
+        (s.customer_name ?? '').toLowerCase().includes(q.toLowerCase()),
+      );
+      if (nameMatches.length === 1) {
+        await pos.loadReturnSale(nameMatches[0].id);
+        setBillQuery('');
+      } else if (nameMatches.length > 1) {
+        setSaleBills(nameMatches);
+        setModalOpen(true);
+        setBillQuery('');
+      }
+      // No name matches either — leave the "No sale found" error from the bill
+      // number lookup above showing, it's still accurate.
+    } catch {
+      /* pos.error already set by findAndLoadReturnSale above */
+    } finally {
+      setLoadingList(false);
     }
   };
 
@@ -110,9 +137,9 @@ export const ReturnSalePicker: React.FC<ReturnSalePickerProps> = ({
           value={billQuery}
           onChangeText={setBillQuery}
           style={[appInputStyle, styles.billInput]}
-          placeholder="Bill no. e.g. SAL-0042"
+          placeholder="Bill no. or customer name"
           placeholderTextColor={colors.textMuted}
-          autoCapitalize="characters"
+          autoCapitalize="words"
           returnKeyType="search"
           onSubmitEditing={lookupBill}
         />
@@ -152,6 +179,8 @@ export const ReturnSalePicker: React.FC<ReturnSalePickerProps> = ({
         visible={modalOpen}
         title="All sale bills"
         emptyMessage="No sale bills available to return"
+        searchable
+        searchPlaceholder="Search bill no. or customer name"
         options={saleBills.map(s => ({
           id: String(s.id),
           label: s.sales_id,

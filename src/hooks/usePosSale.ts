@@ -134,7 +134,11 @@ export const usePosSale = () => {
   const isReturn = transactionMode === 'return';
   const isExchange = transactionMode === 'exchange';
 
-  const returnFromCreditSale = useMemo(
+  // Informational only — true whenever the picked original bill was a credit
+  // sale, in both Return and Exchange modes. Used to keep the return-source's
+  // customer locked in (so the credit-balance adjustment lands on the right
+  // account) without forcing the payment method the way returnFromCreditSale does.
+  const sourceIsCreditSale = useMemo(
     () =>
       (isReturn || isExchange) &&
       returnSourceSale != null &&
@@ -456,13 +460,19 @@ export const usePosSale = () => {
     [cart],
   );
 
+  // Sale-direction only — the product grid (this reads its card badges) only ever
+  // adds sale-direction lines. Without this filter, an Exchange cart holding both
+  // a sale line and a return line for the same item/batch would report whichever
+  // one happens to match first, regardless of direction.
   const getCartLineQty = useCallback(
     (itemId: number, itemBatchId?: number | null) => {
       const batchId = itemBatchId ?? null;
       return (
         cart.find(
           line =>
-            line.item_id === itemId && (line.item_batch_id ?? null) === batchId,
+            line.item_id === itemId &&
+            (line.item_batch_id ?? null) === batchId &&
+            (line.line_direction ?? 'sale') !== 'return',
         )?.qty ?? 0
       );
     },
@@ -697,22 +707,32 @@ export const usePosSale = () => {
     });
   }, []);
 
-  const removeFromCart = useCallback((itemId: number, itemBatchId?: number | null) => {
-    if (itemBatchId === undefined) {
-      setCart(prev => prev.filter(line => line.item_id !== itemId));
-      return;
-    }
-    const batchId = itemBatchId ?? null;
-    setCart(prev =>
-      prev.filter(
-        line =>
-          !(
-            line.item_id === itemId &&
-            (line.item_batch_id ?? null) === batchId
+  const removeFromCart = useCallback(
+    (itemId: number, itemBatchId?: number | null, lineDirection?: 'sale' | 'return') => {
+      if (itemBatchId === undefined) {
+        setCart(prev =>
+          prev.filter(
+            line =>
+              line.item_id !== itemId ||
+              (lineDirection !== undefined && (line.line_direction ?? 'sale') !== lineDirection),
           ),
-      ),
-    );
-  }, []);
+        );
+        return;
+      }
+      const batchId = itemBatchId ?? null;
+      setCart(prev =>
+        prev.filter(
+          line =>
+            !(
+              line.item_id === itemId &&
+              (line.item_batch_id ?? null) === batchId &&
+              (lineDirection === undefined || (line.line_direction ?? 'sale') === lineDirection)
+            ),
+        ),
+      );
+    },
+    [],
+  );
 
   const closeBatchPicker = useCallback(() => {
     setBatchPickerOpen(false);
@@ -804,31 +824,36 @@ export const usePosSale = () => {
    * Exchange mode only — adds a returned item to the cart as a 'return'-direction
    * line, independent of tryAddToCart (which always adds 'sale'-direction lines
    * from the main product grid). Additive: does not touch canSellItem/tryAddToCart.
+   *
+   * Picked directly from the product catalog, same as new-sale items — no
+   * original bill required (same trust-based trade-off "Return without bill"
+   * already has in plain Return mode). If returnSourceSale IS set (a bill was
+   * linked some other way), still enforce its remaining-qty ceiling.
    */
   const tryAddReturnLineToCart = useCallback(
     (displayItem: InventoryItem, qty = 1): boolean => {
-      if (!returnSourceSale) {
-        setError('Pick the original bill before adding return items');
-        return false;
-      }
       const batchId = displayItem.sale_line_batch_id ?? null;
-      const max = getMaxReturnQty(displayItem.id, batchId);
-      if (max <= 0) {
-        setError('This item was not on the original sale');
-        return false;
+
+      if (returnSourceSale) {
+        const max = getMaxReturnQty(displayItem.id, batchId);
+        if (max <= 0) {
+          setError('This item was not on the original sale');
+          return false;
+        }
+        const inCart = cart
+          .filter(
+            line =>
+              line.item_id === displayItem.id &&
+              (line.item_batch_id ?? null) === batchId &&
+              line.line_direction === 'return',
+          )
+          .reduce((sum, line) => sum + line.qty, 0);
+        if (inCart + qty > max) {
+          setError(`Only ${max} remaining on bill ${returnSourceSale.sales_id}`);
+          return false;
+        }
       }
-      const inCart = cart
-        .filter(
-          line =>
-            line.item_id === displayItem.id &&
-            (line.item_batch_id ?? null) === batchId &&
-            line.line_direction === 'return',
-        )
-        .reduce((sum, line) => sum + line.qty, 0);
-      if (inCart + qty > max) {
-        setError(`Only ${max} remaining on bill ${returnSourceSale.sales_id}`);
-        return false;
-      }
+
       const returnBatch = resolveReturnBatch(displayItem);
       addToCart(displayItem, qty, returnBatch, 'return');
       return true;
@@ -880,11 +905,16 @@ export const usePosSale = () => {
     [],
   );
 
-  /** Exchange mode only — sets a return-direction line to an exact qty (manual entry), clamped to remaining returnable qty. Removes the line at 0. */
+  /**
+   * Exchange mode only — sets a return-direction line to an exact qty (manual
+   * entry). Only clamped to a "remaining on bill" ceiling when a bill is
+   * actually linked (returnSourceSale) — otherwise unlimited, same as
+   * tryAddReturnLineToCart above. Removes the line at 0.
+   */
   const setReturnLineQty = useCallback(
     (itemId: number, itemBatchId: number | null | undefined, qty: number) => {
       const batchId = itemBatchId ?? null;
-      const max = getMaxReturnQty(itemId, batchId);
+      const max = returnSourceSale ? getMaxReturnQty(itemId, batchId) : Infinity;
       const clamped = Math.max(0, Math.min(round2(qty), max));
       if (qty > max) {
         setError(`Only ${max} remaining on this bill`);
@@ -909,7 +939,7 @@ export const usePosSale = () => {
         );
       });
     },
-    [getMaxReturnQty],
+    [getMaxReturnQty, returnSourceSale],
   );
 
   const addMainFromBatchPicker = useCallback(
@@ -970,36 +1000,38 @@ export const usePosSale = () => {
     ],
   );
 
+  // lineDirection is optional and, when given, scopes the match to that exact
+  // line — needed in Exchange mode, where a sale line and a return line can
+  // share the same item/batch and must not be confused for one another.
+  // Omitted in Sale/Return modes, where the cart only ever holds one direction
+  // anyway, so the extra check would be a no-op there.
   const updateCartQty = useCallback(
-    (itemId: number, qty: number, itemBatchId?: number | null) => {
+    (
+      itemId: number,
+      qty: number,
+      itemBatchId?: number | null,
+      lineDirection?: 'sale' | 'return',
+    ) => {
       const batchId = itemBatchId ?? null;
+      const matches = (line: CartLine) =>
+        line.item_id === itemId &&
+        (line.item_batch_id ?? null) === batchId &&
+        (lineDirection === undefined || (line.line_direction ?? 'sale') === lineDirection);
+
       if (qty <= 0) {
-        setCart(prev =>
-          prev.filter(
-            line =>
-              !(
-                line.item_id === itemId &&
-                (line.item_batch_id ?? null) === batchId
-              ),
-          ),
-        );
+        setCart(prev => prev.filter(line => !matches(line)));
         return;
       }
 
       setCart(prev => {
-        const current = prev.find(
-          line =>
-            line.item_id === itemId &&
-            (line.item_batch_id ?? null) === batchId,
-        );
+        const current = prev.find(matches);
         if (!current) {
           return prev;
         }
 
         if (qty < current.qty) {
           return prev.map(line =>
-            line.item_id === itemId &&
-            (line.item_batch_id ?? null) === batchId
+            matches(line)
               ? { ...line, qty, line_total: round2(qty * line.unit_price) }
               : line,
           );
@@ -1010,7 +1042,12 @@ export const usePosSale = () => {
         }
 
         let nextQty = qty;
+        const isReturnLine = (current.line_direction ?? 'sale') === 'return';
 
+        // Only bill-based Return mode has a "remaining on bill" ceiling to check —
+        // Exchange return lines aren't tied to a bill (picked directly from the
+        // catalog, same trust-based trade-off as "Return without bill"), so they
+        // skip this entirely rather than clamping to 0 for lack of a bill.
         if (isReturn) {
           const max = getMaxReturnQty(itemId, batchId);
           if (max <= 0) {
@@ -1024,7 +1061,7 @@ export const usePosSale = () => {
         }
 
         const item = items.find(i => i.id === itemId);
-        if (item && !allowNegativeInventory && !isReturn) {
+        if (item && !allowNegativeInventory && !isReturn && !isReturnLine) {
           const stock = item ? itemSellableQty(item) : 0;
           if (stock <= 0) {
             setError(`${item.description} is out of stock`);
@@ -1037,7 +1074,7 @@ export const usePosSale = () => {
         }
 
         return prev.map(line =>
-          line.item_id === itemId && (line.item_batch_id ?? null) === batchId
+          matches(line)
             ? { ...line, qty: nextQty, line_total: round2(nextQty * line.unit_price) }
             : line,
         );
@@ -1047,12 +1084,19 @@ export const usePosSale = () => {
   );
 
   const updateCartUnitPrice = useCallback(
-    (itemId: number, unitPrice: number, itemBatchId?: number | null) => {
+    (
+      itemId: number,
+      unitPrice: number,
+      itemBatchId?: number | null,
+      lineDirection?: 'sale' | 'return',
+    ) => {
       const price = round2(Math.max(0, unitPrice));
       const batchId = itemBatchId ?? null;
       setCart(prev =>
         prev.map(line =>
-          line.item_id === itemId && (line.item_batch_id ?? null) === batchId
+          line.item_id === itemId &&
+          (line.item_batch_id ?? null) === batchId &&
+          (lineDirection === undefined || (line.line_direction ?? 'sale') === lineDirection)
             ? { ...line, unit_price: price, line_total: round2(line.qty * price) }
             : line,
         ),
@@ -1061,6 +1105,11 @@ export const usePosSale = () => {
     [],
   );
 
+  // Sale-direction only — these two drive the main product grid's stepper,
+  // which only ever adds sale-direction lines (return items live in the
+  // separate return-items strip with its own dedicated functions). Without
+  // this filter, an Exchange cart holding both a sale line and a return line
+  // for the same item/batch could decrement/remove the wrong one.
   const decrementDisplayCartQty = useCallback(
     (displayItem: InventoryItem, itemBatchId?: number | null) => {
       const variantIds = variantIdsForDisplayItem(displayItem, variantsByItemNumberRef.current);
@@ -1071,16 +1120,24 @@ export const usePosSale = () => {
         } else {
           const mainLine = prev.find(
             line =>
-              variantIds.includes(line.item_id) && line.item_batch_id == null,
+              variantIds.includes(line.item_id) &&
+              line.item_batch_id == null &&
+              (line.line_direction ?? 'sale') !== 'return',
           );
           const line =
-            mainLine ?? prev.find(cartLine => variantIds.includes(cartLine.item_id));
+            mainLine ??
+            prev.find(
+              cartLine =>
+                variantIds.includes(cartLine.item_id) &&
+                (cartLine.line_direction ?? 'sale') !== 'return',
+            );
           batchId = line?.item_batch_id ?? null;
         }
         const line = prev.find(
           cartLine =>
             variantIds.includes(cartLine.item_id) &&
-            (cartLine.item_batch_id ?? null) === batchId,
+            (cartLine.item_batch_id ?? null) === batchId &&
+            (cartLine.line_direction ?? 'sale') !== 'return',
         );
         if (!line) {
           return prev;
@@ -1091,13 +1148,15 @@ export const usePosSale = () => {
             cartLine =>
               !(
                 cartLine.item_id === line.item_id &&
-                (cartLine.item_batch_id ?? null) === batchId
+                (cartLine.item_batch_id ?? null) === batchId &&
+                (cartLine.line_direction ?? 'sale') !== 'return'
               ),
           );
         }
         return prev.map(cartLine =>
           cartLine.item_id === line.item_id &&
-          (cartLine.item_batch_id ?? null) === batchId
+          (cartLine.item_batch_id ?? null) === batchId &&
+          (cartLine.line_direction ?? 'sale') !== 'return'
             ? {
                 ...cartLine,
                 qty: nextQty,
@@ -1114,7 +1173,13 @@ export const usePosSale = () => {
     (displayItem: InventoryItem, itemBatchId?: number | null) => {
       const variantIds = variantIdsForDisplayItem(displayItem, variantsByItemNumberRef.current);
       if (itemBatchId === undefined) {
-        setCart(prev => prev.filter(line => !variantIds.includes(line.item_id)));
+        setCart(prev =>
+          prev.filter(
+            line =>
+              !variantIds.includes(line.item_id) ||
+              (line.line_direction ?? 'sale') === 'return',
+          ),
+        );
         return;
       }
       const batchId = itemBatchId ?? null;
@@ -1123,7 +1188,8 @@ export const usePosSale = () => {
           line =>
             !(
               variantIds.includes(line.item_id) &&
-              (line.item_batch_id ?? null) === batchId
+              (line.item_batch_id ?? null) === batchId &&
+              (line.line_direction ?? 'sale') !== 'return'
             ),
         ),
       );
@@ -1131,23 +1197,24 @@ export const usePosSale = () => {
     [],
   );
 
+  // lineDirection optional, same rationale as updateCartQty above.
   const decrementCartQty = useCallback(
-    (itemId: number, itemBatchId?: number | null) => {
+    (itemId: number, itemBatchId?: number | null, lineDirection?: 'sale' | 'return') => {
       setCart(prev => {
+        const matches = (line: CartLine) =>
+          line.item_id === itemId &&
+          (lineDirection === undefined || (line.line_direction ?? 'sale') === lineDirection);
+
         let batchId: number | null;
         if (itemBatchId !== undefined) {
           batchId = itemBatchId ?? null;
         } else {
-          const mainLine = prev.find(
-            line => line.item_id === itemId && line.item_batch_id == null,
-          );
-          const line = mainLine ?? prev.find(cartLine => cartLine.item_id === itemId);
+          const mainLine = prev.find(line => matches(line) && line.item_batch_id == null);
+          const line = mainLine ?? prev.find(matches);
           batchId = line?.item_batch_id ?? null;
         }
         const line = prev.find(
-          cartLine =>
-            cartLine.item_id === itemId &&
-            (cartLine.item_batch_id ?? null) === batchId,
+          cartLine => matches(cartLine) && (cartLine.item_batch_id ?? null) === batchId,
         );
         if (!line) {
           return prev;
@@ -1155,16 +1222,11 @@ export const usePosSale = () => {
         const nextQty = line.qty - 1;
         if (nextQty <= 0) {
           return prev.filter(
-            cartLine =>
-              !(
-                cartLine.item_id === itemId &&
-                (cartLine.item_batch_id ?? null) === batchId
-              ),
+            cartLine => !(matches(cartLine) && (cartLine.item_batch_id ?? null) === batchId),
           );
         }
         return prev.map(cartLine =>
-          cartLine.item_id === itemId &&
-          (cartLine.item_batch_id ?? null) === batchId
+          matches(cartLine) && (cartLine.item_batch_id ?? null) === batchId
             ? {
                 ...cartLine,
                 qty: nextQty,
@@ -1332,6 +1394,28 @@ export const usePosSale = () => {
     }
     return round2(Math.max(0, subTotal - discount - offerDiscount));
   }, [isExchange, saleSubTotal, returnSubTotal, discount, offerDiscount, subTotal]);
+
+  // Forces the payment method to "refund to account" (no cash/card choice) in
+  // two cases:
+  //  - Plain Return, source was credit: there are no new items to sell for
+  //    cash, so nothing should ever be paid out at the register.
+  //  - Exchange, source was credit, AND the net result is a refund due back to
+  //    the customer: nothing was actually paid in cash for the returned item,
+  //    so a cash "refund" here would be a real loss — the debt must just be
+  //    written off via the account instead (see CustomerBalanceService on the
+  //    backend, which independently still clears it).
+  // When an Exchange nets to zero or positive (customer owes something), the
+  // cashier is free to pick cash/card/etc — the backend separately still
+  // clears the credited debt for the returned item regardless of that choice.
+  const returnFromCreditSale = useMemo(() => {
+    if (!sourceIsCreditSale) {
+      return false;
+    }
+    if (isReturn) {
+      return true;
+    }
+    return isExchange && netAmount < -0.005;
+  }, [sourceIsCreditSale, isReturn, isExchange, netAmount]);
 
   const clearHoldSession = useCallback(() => {
     setActiveHoldId(null);
@@ -1940,10 +2024,6 @@ export const usePosSale = () => {
       setError('Remove out-of-stock items from the cart before payment');
       return null;
     }
-    if (isExchange && checkoutReturnLines.length > 0 && !returnSourceSale) {
-      setError('Pick the original bill before adding return items');
-      return null;
-    }
     if (checkoutDiscount > checkoutSubTotal) {
       setError('Discount cannot exceed subtotal');
       return null;
@@ -1982,7 +2062,7 @@ export const usePosSale = () => {
       return null;
     }
     if (
-      returnFromCreditSale &&
+      sourceIsCreditSale &&
       (isWalkIn ||
         (returnSourceSale?.customer_id != null &&
           activeCustomer.id !== returnSourceSale.customer_id))
@@ -2129,6 +2209,7 @@ export const usePosSale = () => {
       prepareCheckout,
       returnSourceSale,
       returnFromCreditSale,
+      sourceIsCreditSale,
       paymentMethods,
       salesId,
       selectedOffer,

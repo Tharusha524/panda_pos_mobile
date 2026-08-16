@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -7,7 +7,9 @@ import {
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
+  View,
 } from 'react-native';
+import ViewShot, { type ViewShotRef } from 'react-native-view-shot';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -20,12 +22,17 @@ import { AppHeader } from '@/components/common/AppHeader';
 import { FilterChips } from '@/components/common/FilterChips';
 import { PrimaryButton } from '@/components/buttons/PrimaryButton';
 import { LoadingOverlay } from '@/components/common/LoadingOverlay';
+import { CustomerStatementReceiptView } from '@/components/customers/CustomerStatementReceiptView';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { useDataRefreshNotify } from '@/context/DataRefreshContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { customerService } from '@/services/api/customerService';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
-import { buildPrintHeaderFromSettings } from '@/utils/receiptPrintCustomization';
+import {
+  buildPrintHeaderFromSettings,
+  getReceiptPrintCustomization,
+} from '@/utils/receiptPrintCustomization';
+import { captureReceiptBase64 } from '@/utils/receiptImageShare';
 import { formatCurrency } from '@/utils/format';
 import {
   colors,
@@ -65,6 +72,7 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
   const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [notes, setNotes] = useState('');
+  const statementShotRef = useRef<ViewShotRef>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,6 +100,7 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
   const outstanding = Math.max(0, customer?.net_balance ?? 0);
   const amountNum = parseFloat(amount.replace(/,/g, '')) || 0;
   const newBalance = Math.max(0, Math.round((outstanding - amountNum) * 100) / 100);
+  const printHeader = buildPrintHeaderFromSettings(settings);
 
   const handleReceive = async () => {
     if (!customer) {
@@ -151,15 +160,31 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
   };
 
   // Standalone — prints the customer's current details/balance any time, independent
-  // of actually receiving a payment right now.
+  // of actually receiving a payment right now. Same button, no extra tap: captures
+  // the hidden preview below as an image first when "print receipt as image" is on,
+  // otherwise falls back to the plain text printout as before.
   const handlePrintStatement = async () => {
     if (!customer) {
       return;
     }
     setPrinting(true);
     try {
-      const header = buildPrintHeaderFromSettings(settings);
-      await bluetoothPrintService.printCustomerStatement(customer, header, settings);
+      let capturedImageBase64: string | undefined;
+      try {
+        const customization = await getReceiptPrintCustomization(settings);
+        if (customization.printAsImage) {
+          capturedImageBase64 = await captureReceiptBase64(statementShotRef);
+        }
+      } catch {
+        // Couldn't read the setting or capture the preview — fall back to the
+        // normal text receipt below instead of blocking the print entirely.
+      }
+      await bluetoothPrintService.printCustomerStatement(
+        customer,
+        printHeader,
+        settings,
+        capturedImageBase64,
+      );
     } catch (e) {
       showErrorFromUnknown(e, 'Print customer details');
     } finally {
@@ -299,6 +324,19 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
           </SmoothScrollView>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
+
+      {customer ? (
+        // Off-screen — never shown to the cashier, only captured as an image when
+        // "print receipt as image" is on (see handlePrintStatement above).
+        <View style={styles.hiddenCapture} collapsable={false} pointerEvents="none">
+          <ViewShot
+            ref={statementShotRef}
+            options={{ format: 'png', quality: 1, result: 'tmpfile' }}
+            style={styles.hiddenCaptureInner}>
+            <CustomerStatementReceiptView customer={customer} header={printHeader} settings={settings} />
+          </ViewShot>
+        </View>
+      ) : null}
     </ScreenContainer>
   );
 };
@@ -308,6 +346,15 @@ const styles = StyleSheet.create({
   scroll: {
     paddingHorizontal: 20,
     paddingTop: 12,
+  },
+  hiddenCapture: {
+    position: 'absolute',
+    top: 0,
+    left: -2000,
+    width: 400,
+  },
+  hiddenCaptureInner: {
+    backgroundColor: '#fff',
   },
   customerCard: {
     backgroundColor: colors.white,

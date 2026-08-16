@@ -55,6 +55,13 @@ type Nav = NativeStackNavigationProp<SalesStackParamList, 'SaleOrder'>;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+// cartLineKey() alone (item + batch) collides for Exchange mode, where a sale
+// line and a return line can share the same item/batch — that shared key was
+// causing the qty/price draft state (and the list's React key) for one line
+// to bleed into the other. Suffix with direction so every line here is unique.
+const orderLineKey = (line: CartLine): string =>
+  `${cartLineKey(line.item_id, line.item_batch_id)}:${line.line_direction ?? 'sale'}`;
+
 const parseDraftQty = (raw: string | undefined): number | null => {
   if (raw == null) {
     return null;
@@ -130,7 +137,7 @@ export const SaleOrderScreen: React.FC = () => {
 
   const getEffectiveQty = useCallback(
     (line: CartLine): number => {
-      const key = cartLineKey(line.item_id, line.item_batch_id);
+      const key = orderLineKey(line);
       const parsed = parseDraftQty(qtyDrafts[key]);
       if (parsed !== null && parsed > 0) {
         return parsed;
@@ -142,7 +149,7 @@ export const SaleOrderScreen: React.FC = () => {
 
   const getEffectiveUnitPrice = useCallback(
     (line: CartLine): number => {
-      const key = cartLineKey(line.item_id, line.item_batch_id);
+      const key = orderLineKey(line);
       const parsed = parseDraftPrice(priceDrafts[key]);
       if (parsed !== null && parsed >= 0) {
         return parsed;
@@ -204,7 +211,7 @@ export const SaleOrderScreen: React.FC = () => {
 
   const buildCheckoutCart = useCallback((): CartLine[] => {
     return pos.cart.map(line => {
-      const key = cartLineKey(line.item_id, line.item_batch_id);
+      const key = orderLineKey(line);
       const parsed = parseDraftQty(qtyDrafts[key]);
       const qty = parsed !== null && parsed > 0 ? parsed : line.qty;
       const unitPrice = getEffectiveUnitPrice(line);
@@ -275,7 +282,7 @@ export const SaleOrderScreen: React.FC = () => {
     setQtyDrafts(prev => {
       const next: Record<string, string> = {};
       for (const line of pos.cart) {
-        const key = cartLineKey(line.item_id, line.item_batch_id);
+        const key = orderLineKey(line);
         const draft = prev[key];
         const parsed = parseDraftQty(draft);
         next[key] =
@@ -291,7 +298,7 @@ export const SaleOrderScreen: React.FC = () => {
     setPriceDrafts(prev => {
       const next: Record<string, string> = {};
       for (const line of pos.cart) {
-        const key = cartLineKey(line.item_id, line.item_batch_id);
+        const key = orderLineKey(line);
         const draft = prev[key];
         const parsed = parseDraftPrice(draft);
         next[key] =
@@ -393,7 +400,7 @@ export const SaleOrderScreen: React.FC = () => {
 
   const commitLineQty = useCallback(
     (line: CartLine, raw: string) => {
-      const key = cartLineKey(line.item_id, line.item_batch_id);
+      const key = orderLineKey(line);
       const trimmed = raw.trim();
       if (!trimmed) {
         setQtyDrafts(prev => ({
@@ -404,17 +411,17 @@ export const SaleOrderScreen: React.FC = () => {
       }
       const parsed = parseDraftQty(trimmed);
       if (parsed === null || parsed <= 0) {
-        pos.removeFromCart(line.item_id, line.item_batch_id ?? null);
+        pos.removeFromCart(line.item_id, line.item_batch_id ?? null, line.line_direction);
         return;
       }
-      pos.updateCartQty(line.item_id, parsed, line.item_batch_id ?? null);
+      pos.updateCartQty(line.item_id, parsed, line.item_batch_id ?? null, line.line_direction);
     },
     [pos],
   );
 
   const commitLinePrice = useCallback(
     (line: CartLine, raw: string) => {
-      const key = cartLineKey(line.item_id, line.item_batch_id);
+      const key = orderLineKey(line);
       const trimmed = raw.trim();
       if (!trimmed) {
         setPriceDrafts(prev => ({
@@ -425,7 +432,7 @@ export const SaleOrderScreen: React.FC = () => {
       }
       const parsed = parseDraftPrice(trimmed);
       const price = parsed !== null ? Math.max(0, parsed) : line.unit_price;
-      pos.updateCartUnitPrice(line.item_id, price, line.item_batch_id ?? null);
+      pos.updateCartUnitPrice(line.item_id, price, line.item_batch_id ?? null, line.line_direction);
       setPriceDrafts(prev => ({ ...prev, [key]: String(price) }));
     },
     [pos],
@@ -433,7 +440,7 @@ export const SaleOrderScreen: React.FC = () => {
 
   const commitAllQtyDrafts = useCallback(() => {
     for (const line of pos.cart) {
-      const key = cartLineKey(line.item_id, line.item_batch_id);
+      const key = orderLineKey(line);
       commitLineQty(line, qtyDrafts[key] ?? String(line.qty));
     }
   }, [commitLineQty, pos.cart, qtyDrafts]);
@@ -443,7 +450,7 @@ export const SaleOrderScreen: React.FC = () => {
       return;
     }
     for (const line of pos.cart) {
-      const key = cartLineKey(line.item_id, line.item_batch_id);
+      const key = orderLineKey(line);
       commitLinePrice(line, priceDrafts[key] ?? String(line.unit_price));
     }
   }, [commitLinePrice, pos.cart, pos.isReturn, priceDrafts]);
@@ -537,15 +544,6 @@ export const SaleOrderScreen: React.FC = () => {
       showError({
         title: 'Stock issue',
         message: 'Remove or reduce out-of-stock items before payment.',
-        variant: 'warning',
-      });
-      return;
-    }
-
-    if (pos.isExchange && checkoutCart.some(l => l.line_direction === 'return') && !pos.returnSourceSale) {
-      showError({
-        title: 'Exchange',
-        message: 'Pick the original bill before adding return items.',
         variant: 'warning',
       });
       return;
@@ -839,7 +837,7 @@ export const SaleOrderScreen: React.FC = () => {
             ) : null}
 
             {pos.cart.map(line => {
-              const lineKey = cartLineKey(line.item_id, line.item_batch_id);
+              const lineKey = orderLineKey(line);
               const item = itemStockMap.get(line.item_id);
               const stock = item?.qty ?? 0;
               // In Sale/Return modes every line matches the screen-wide mode already —
@@ -867,6 +865,7 @@ export const SaleOrderScreen: React.FC = () => {
                   qtyDraft={qtyDrafts[lineKey] ?? String(line.qty)}
                   priceDraft={priceDrafts[lineKey] ?? String(line.unit_price)}
                   allowEditPrice
+                  allowEditReturnPrice={pos.isExchange}
                   lineTotal={lineTotalPreview}
                   offerDiscount={offerLineDiscount}
                   isReturn={lineIsReturn}
@@ -888,7 +887,11 @@ export const SaleOrderScreen: React.FC = () => {
                     commitLinePrice(line, priceDrafts[lineKey] ?? String(line.unit_price))
                   }
                   onDecrement={() =>
-                    pos.decrementCartQty(line.item_id, line.item_batch_id ?? null)
+                    pos.decrementCartQty(
+                      line.item_id,
+                      line.item_batch_id ?? null,
+                      line.line_direction,
+                    )
                   }
                   onIncrement={() => {
                     const parsed = parseDraftQty(qtyDrafts[lineKey]);
@@ -897,10 +900,11 @@ export const SaleOrderScreen: React.FC = () => {
                       line.item_id,
                       current + 1,
                       line.item_batch_id ?? null,
+                      line.line_direction,
                     );
                   }}
                   onRemove={() =>
-                    pos.removeFromCart(line.item_id, line.item_batch_id ?? null)
+                    pos.removeFromCart(line.item_id, line.item_batch_id ?? null, line.line_direction)
                   }
                 />
               );
@@ -1070,9 +1074,7 @@ export const SaleOrderScreen: React.FC = () => {
             </HStack>
           </View>
 
-          {pos.isReturn ||
-          (pos.isExchange &&
-            (pos.returnSourceSale || pos.cart.some(l => l.line_direction === 'return'))) ? (
+          {pos.isReturn ? (
             <>
               <Text style={styles.sectionTitle}>Original sale</Text>
               <TextInput
@@ -1083,23 +1085,24 @@ export const SaleOrderScreen: React.FC = () => {
                 placeholderTextColor={colors.textMuted}
                 editable={!pos.returnSourceSale}
               />
-              {needsRefundCardUi && refundCardReady && !savedRefundCardLast4 && !pos.returnFromCreditSale ? (
-                <>
-                  <Text style={styles.sectionTitle}>Refund card last 4 digits</Text>
-                  <Text style={styles.refundCardHint}>
-                    Enter once — saved on this device for all future returns.
-                  </Text>
-                  <TextInput
-                    value={refundCardLast4}
-                    onChangeText={t => setRefundCardLast4(t.replace(/\D/g, '').slice(0, 4))}
-                    keyboardType="number-pad"
-                    maxLength={4}
-                    style={appInputStyle}
-                    placeholder="••••"
-                    placeholderTextColor={colors.textMuted}
-                  />
-                </>
-              ) : null}
+            </>
+          ) : null}
+
+          {needsRefundCardUi && refundCardReady && !savedRefundCardLast4 && !pos.returnFromCreditSale ? (
+            <>
+              <Text style={styles.sectionTitle}>Refund card last 4 digits</Text>
+              <Text style={styles.refundCardHint}>
+                Enter once — saved on this device for all future returns.
+              </Text>
+              <TextInput
+                value={refundCardLast4}
+                onChangeText={t => setRefundCardLast4(t.replace(/\D/g, '').slice(0, 4))}
+                keyboardType="number-pad"
+                maxLength={4}
+                style={appInputStyle}
+                placeholder="••••"
+                placeholderTextColor={colors.textMuted}
+              />
             </>
           ) : null}
 
