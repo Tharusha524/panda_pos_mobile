@@ -24,6 +24,8 @@ import { PaymentMethodPicker } from '@/components/sales/PaymentMethodPicker';
 import { PaymentMethodDetails } from '@/components/sales/PaymentMethodDetails';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePurchaseCreateContext } from '@/context/PurchaseCreateContext';
+import { resolvePurchaseCartLines } from '@/hooks/usePurchaseCreate';
+import { buildPurchaseReceiptPayload } from '@/utils/purchaseReceipt';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { bankService, type BankAccount } from '@/services/api/bankService';
 import { WALK_IN_SUPPLIER } from '@/services/api/supplierService';
@@ -40,6 +42,8 @@ import { colors, shadows, TAB_BAR_BOTTOM_MARGIN, typography, appInputStyle, appI
 import type { ProductsStackParamList } from '@/navigation/types';
 
 type Nav = NativeStackNavigationProp<ProductsStackParamList, 'PurchaseOrder'>;
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 const parseDraftQty = (raw: string | undefined): number | null => {
   if (raw == null) {
@@ -226,29 +230,63 @@ export const PurchaseOrderScreen: React.FC = () => {
       cardLast4: paymentCardLast4,
     });
 
-    const result = await purchase.completePurchase(
-      {
-        payment_method: paymentMethod,
-        amount_received: received,
-        bank_id: needsBank(paymentMethod) ? bankId : null,
-        cheque_number: /cheque/i.test(paymentMethod)
-          ? chequeNumber.trim() || undefined
-          : undefined,
-        notes: paymentNotes,
-      },
-      activeLocation,
-      settings,
-      { priceDrafts, qtyDrafts },
+    // Nothing is saved yet — land on the real purchase receipt screen in
+    // "review" mode (same builder + component used once it's really saved),
+    // so a mistake spotted there can still be fixed before "Confirm" is tapped.
+    const committedLines = resolvePurchaseCartLines(purchase.cart, {
+      priceDrafts,
+      qtyDrafts,
+    });
+    const committedSubTotal = round2(
+      committedLines.reduce((sum, line) => sum + line.line_total, 0),
     );
 
-    if (!result) {
-      return;
-    }
+    const draftReceipt = buildPurchaseReceiptPayload({
+      invoiceId: purchase.invoiceId,
+      location: activeLocation,
+      supplierName: purchase.supplier?.supplier_name ?? 'Walk-in Supplier',
+      supplierContactNo: purchase.supplier?.contact_no ?? null,
+      supplierEmail: purchase.supplier?.email ?? null,
+      purchaseDate: new Date().toISOString().slice(0, 10),
+      lines: committedLines,
+      subTotal: committedSubTotal,
+      amount: committedSubTotal,
+      paymentMethod,
+      amountPaid: received,
+      notes: paymentNotes,
+      settings,
+    });
 
-    // No auto-print here — land on the receipt screen so the cashier sees the
-    // preview first and prints from there (its own Print button), rather than a
-    // receipt firing silently before it's even been reviewed.
-    navigation.replace('PurchaseReceipt', { receipt: result.receipt });
+    navigation.navigate('PurchaseReceipt', {
+      receipt: draftReceipt,
+      pendingConfirm: {
+        title: 'Confirm purchase order',
+        confirmLabel: 'Confirm & Save',
+        onEdit: () => navigation.goBack(),
+        onConfirm: async () => {
+          const result = await purchase.completePurchase(
+            {
+              payment_method: paymentMethod,
+              amount_received: received,
+              bank_id: needsBank(paymentMethod) ? bankId : null,
+              cheque_number: /cheque/i.test(paymentMethod)
+                ? chequeNumber.trim() || undefined
+                : undefined,
+              notes: paymentNotes,
+            },
+            activeLocation,
+            settings,
+            { priceDrafts, qtyDrafts },
+          );
+
+          if (!result) {
+            return;
+          }
+
+          navigation.replace('PurchaseReceipt', { receipt: result.receipt });
+        },
+      },
+    });
   };
 
   if (purchase.cart.length === 0 && !purchase.submitting) {

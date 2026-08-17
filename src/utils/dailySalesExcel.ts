@@ -11,6 +11,10 @@ interface PivotItemColumn {
 interface PivotRow {
   customer: string;
   paymentMethod: string;
+  /** Blank unless this sale was paid by cheque. */
+  chequeNumber: string;
+  /** Blank unless a bank was recorded (cheque or bank transfer). */
+  bankName: string;
   total: number;
   /** unitPrice is the per-unit price of the product on this sale, not a summed amount. */
   perItem: Record<string, { qty: number; unitPrice: number }>;
@@ -63,6 +67,8 @@ export function buildDailySalesPivot(sales: SalesSummarySale[]): PivotResult {
     return {
       customer: sale.customer || 'Walk-in',
       paymentMethod: sale.payment_method || '—',
+      chequeNumber: sale.cheque_number?.trim() || '',
+      bankName: sale.bank_name?.trim() || '',
       total: sale.net_amount,
       perItem,
     };
@@ -95,38 +101,50 @@ export function buildDailySalesPivot(sales: SalesSummarySale[]): PivotResult {
 export async function buildDailySalesWorkbookBase64(
   sales: SalesSummarySale[],
   dateLabel: string,
+  title: string = 'Daily Sale Report',
 ): Promise<{ base64: string; isEmpty: boolean }> {
   const { columns, rows, totals } = buildDailySalesPivot(sales);
-  const totalCols = 1 + columns.length * 2 + 2; // Name + item pairs + Payment + Total
+  // Name + item pairs + Payment Method + Cheque Number + Bank Name + Total
+  const totalCols = 1 + columns.length * 2 + 4;
+  const paymentCol = totalCols - 3;
+  const chequeCol = totalCols - 2;
+  const bankCol = totalCols - 1;
+  const totalCol = totalCols;
 
   const workbook = new ExcelJS.Workbook();
-  const ws = workbook.addWorksheet('Daily Sale Report');
+  const ws = workbook.addWorksheet(title);
 
   ws.getColumn(1).width = 18;
   columns.forEach((_, idx) => {
     ws.getColumn(2 + idx * 2).width = 8;
     ws.getColumn(3 + idx * 2).width = 10;
   });
-  ws.getColumn(totalCols - 1).width = 14;
-  ws.getColumn(totalCols).width = 12;
+  ws.getColumn(paymentCol).width = 18;
+  ws.getColumn(chequeCol).width = 16;
+  ws.getColumn(bankCol).width = 18;
+  ws.getColumn(totalCol).width = 12;
 
   // Title row
-  const titleRow = ws.addRow([`Daily Sale Report — ${dateLabel}`]);
+  const titleRow = ws.addRow([`${title} — ${dateLabel}`]);
   ws.mergeCells(1, 1, 1, totalCols);
   titleRow.getCell(1).font = { bold: true, size: 13 };
   titleRow.getCell(1).alignment = { horizontal: 'center' };
 
   ws.addRow([]);
 
-  // Header rows (Name | <item> ... | Payment Method | Total, then Pcs/Unit Price sub-labels)
+  // Header rows (Name | <item> ... | Payment Method | Ch. Details | Total,
+  // then Pcs/Unit Price / Cheque Number/Bank Name sub-labels) — Cheque Number
+  // and Bank Name sit as two sub-columns under one merged main header, the
+  // same pattern each item column already uses (name on top, Pcs/Unit Price
+  // underneath).
   const headerRow1: (string | number)[] = ['Name'];
   const headerRow2: (string | number)[] = [''];
   for (const col of columns) {
     headerRow1.push(col.key, '');
     headerRow2.push('Pcs', 'Unit Price');
   }
-  headerRow1.push('Payment Method', 'Total');
-  headerRow2.push('', '');
+  headerRow1.push('Payment Method', 'Ch. Details', '', 'Total');
+  headerRow2.push('', 'Cheque Number', 'Bank Name', '');
 
   const headerRowIndex1 = ws.addRow(headerRow1).number;
   const headerRowIndex2 = ws.addRow(headerRow2).number;
@@ -135,8 +153,10 @@ export async function buildDailySalesWorkbookBase64(
     const startCol = 2 + idx * 2;
     ws.mergeCells(headerRowIndex1, startCol, headerRowIndex1, startCol + 1);
   });
-  ws.mergeCells(headerRowIndex1, totalCols - 1, headerRowIndex2, totalCols - 1);
-  ws.mergeCells(headerRowIndex1, totalCols, headerRowIndex2, totalCols);
+  ws.mergeCells(headerRowIndex1, chequeCol, headerRowIndex1, bankCol);
+  for (const col of [paymentCol, totalCol]) {
+    ws.mergeCells(headerRowIndex1, col, headerRowIndex2, col);
+  }
   ws.mergeCells(headerRowIndex1, 1, headerRowIndex2, 1);
 
   for (let r = headerRowIndex1; r <= headerRowIndex2; r++) {
@@ -156,7 +176,7 @@ export async function buildDailySalesWorkbookBase64(
       const cell = row.perItem[col.key];
       line.push(cell ? cell.qty : '', cell ? cell.unitPrice : '');
     }
-    line.push(row.paymentMethod, row.total);
+    line.push(row.paymentMethod, row.chequeNumber, row.bankName, row.total);
     ws.addRow(line);
   }
 
@@ -167,7 +187,7 @@ export async function buildDailySalesWorkbookBase64(
     // Unit price isn't summable across sales — leave that side of the total row blank.
     totalLine.push(t.qty, '');
   }
-  totalLine.push('', totals.grandTotal);
+  totalLine.push('', '', '', totals.grandTotal);
   const totalRow = ws.addRow(totalLine);
   totalRow.eachCell({ includeEmpty: true }, cell => {
     cell.font = { bold: true };

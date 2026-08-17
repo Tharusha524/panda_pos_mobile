@@ -61,13 +61,12 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
   const { currency, settings } = usePosSettings();
-  const { showError, showErrorFromUnknown, showConfirm } = useErrorDialog();
+  const { showError, showErrorFromUnknown } = useErrorDialog();
   const notifyRefresh = useDataRefreshNotify();
   const customerId = route.params.customerId;
 
   const [loading, setLoading] = useState(true);
   const [printing, setPrinting] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [customer, setCustomer] = useState<CustomerSummary | null>(null);
   const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
@@ -102,7 +101,7 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
   const newBalance = Math.max(0, Math.round((outstanding - amountNum) * 100) / 100);
   const printHeader = buildPrintHeaderFromSettings(settings);
 
-  const handleReceive = async () => {
+  const handleReceive = () => {
     if (!customer) {
       return;
     }
@@ -131,32 +130,42 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
       return;
     }
 
-    setSubmitting(true);
-    try {
-      const result = await customerService.receivePayment(customer.id, {
-        amount: amountNum,
-        payment_method: paymentMethod,
-        notes: notes.trim() || null,
-      });
-      notifyRefresh(['customers', 'sales', 'dashboard', 'reports']);
-      const paidNotes = notes;
-      showConfirm({
-        title: 'Payment recorded',
-        message: `Received ${formatCurrency(result.payment_received, currency)} from ${customer.customer_name}. New balance: ${formatCurrency(result.new_balance, currency)}.`,
-        confirmLabel: 'Print Receipt',
-        cancelLabel: 'Done',
-        onConfirm: () => {
-          navigation.navigate('PaymentReceipt', {
-            receipt: { result, notes: paidNotes || null },
-          });
+    // Nothing is saved yet — land on the real payment receipt screen in
+    // "review" mode (same layout used once it's really recorded), and let the
+    // user back out (Edit) to fix the amount/method before it's recorded.
+    const paidNotes = notes;
+    navigation.navigate('PaymentReceipt', {
+      receipt: {
+        result: {
+          customer,
+          payment_received: amountNum,
+          previous_balance: outstanding,
+          new_balance: newBalance,
+          payment_method: paymentMethod,
         },
-      });
-      navigation.goBack();
-    } catch (e) {
-      showErrorFromUnknown(e, 'Receive payment');
-    } finally {
-      setSubmitting(false);
-    }
+        notes: paidNotes || null,
+      },
+      pendingConfirm: {
+        title: 'Confirm payment',
+        confirmLabel: 'Confirm & Print',
+        onEdit: () => navigation.goBack(),
+        onConfirm: async () => {
+          try {
+            const result = await customerService.receivePayment(customer.id, {
+              amount: amountNum,
+              payment_method: paymentMethod,
+              notes: paidNotes.trim() || null,
+            });
+            notifyRefresh(['customers', 'sales', 'dashboard', 'reports']);
+            navigation.replace('PaymentReceipt', {
+              receipt: { result, notes: paidNotes || null },
+            });
+          } catch (e) {
+            showErrorFromUnknown(e, 'Receive payment');
+          }
+        },
+      },
+    });
   };
 
   // Standalone — prints the customer's current details/balance any time, independent
@@ -316,7 +325,6 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
                 <PrimaryButton
                   label="Receive payment"
                   onPress={handleReceive}
-                  loading={submitting}
                   disabled={loading || outstanding <= 0}
                 />
               </VStack>

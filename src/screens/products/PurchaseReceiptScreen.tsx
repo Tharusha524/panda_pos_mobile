@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { View } from 'react-native';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import ViewShot, { type ViewShotRef } from 'react-native-view-shot';
-import { Box } from '@gluestack-ui/themed';
+import { Box, Text } from '@gluestack-ui/themed';
 import { useNavigation, useRoute, CommonActions } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
@@ -20,6 +20,7 @@ import {
   shareReceiptImageFile,
 } from '@/utils/receiptImageShare';
 import { getReceiptPrintCustomization } from '@/utils/receiptPrintCustomization';
+import { colors } from '@/theme';
 import type { ProductsStackParamList } from '@/navigation/types';
 
 type Route = RouteProp<ProductsStackParamList, 'PurchaseReceipt'>;
@@ -35,7 +36,21 @@ export const PurchaseReceiptScreen: React.FC = () => {
   const { showError, showConfirm } = useErrorDialog();
   const [printing, setPrinting] = useState(false);
   const [savingImage, setSavingImage] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const receiptShotRef = useRef<ViewShotRef>(null);
+  const { pendingConfirm } = params;
+
+  const handleConfirmPending = async () => {
+    if (!pendingConfirm) {
+      return;
+    }
+    setConfirming(true);
+    try {
+      await pendingConfirm.onConfirm();
+    } finally {
+      setConfirming(false);
+    }
+  };
 
   const promptPrinterSetup = (message: string) => {
     showConfirm({
@@ -120,10 +135,19 @@ export const PurchaseReceiptScreen: React.FC = () => {
   return (
     <ScreenContainer>
       <AppHeader
-        title="Purchase bill"
+        title={pendingConfirm ? pendingConfirm.title : 'Purchase bill'}
         subtitle={params.receipt.purchase.invoice_id}
         showBack
       />
+
+      {pendingConfirm ? (
+        <Box px="$4" pt="$2">
+          <Text size="xs" color={colors.textMuted}>
+            Please check every detail below — this cannot be edited after it&apos;s
+            confirmed.
+          </Text>
+        </Box>
+      ) : null}
 
       <SmoothScrollView
         contentContainerStyle={{ padding: 16, alignItems: 'center' }}
@@ -137,42 +161,60 @@ export const PurchaseReceiptScreen: React.FC = () => {
           </ViewShot>
         </View>
         <Box w="100%" maxWidth={400} gap="$2">
-          <PrimaryButton
-            label={savingImage ? 'Saving…' : 'Download receipt image'}
-            variant="outline"
-            onPress={handleDownloadImage}
-            loading={savingImage}
-          />
-          <PrimaryButton
-            label="Share receipt image"
-            variant="outline"
-            onPress={handleShareImage}
-            disabled={savingImage}
-          />
-          {bluetoothPrintService.isSupported() ? (
-            <PrimaryButton
-              label={printing ? 'Printing…' : 'Print bill via Bluetooth'}
-              onPress={handlePrint}
-              loading={printing}
-            />
-          ) : null}
-          <PrimaryButton
-            label="New purchase"
-            variant={bluetoothPrintService.isSupported() ? 'outline' : 'primary'}
-            onPress={() =>
-              navigation.dispatch(
-                CommonActions.reset({
-                  index: 0,
-                  routes: [{ name: 'PurchaseCreate' }],
-                }),
-              )
-            }
-          />
-          <PrimaryButton
-            label="Purchase list"
-            variant="outline"
-            onPress={() => navigation.navigate('PurchasesList')}
-          />
+          {pendingConfirm ? (
+            <>
+              <PrimaryButton
+                label={pendingConfirm.confirmLabel}
+                onPress={handleConfirmPending}
+                loading={confirming}
+              />
+              <PrimaryButton
+                label="Edit"
+                variant="outline"
+                onPress={pendingConfirm.onEdit}
+                disabled={confirming}
+              />
+            </>
+          ) : (
+            <>
+              <PrimaryButton
+                label={savingImage ? 'Saving…' : 'Download receipt image'}
+                variant="outline"
+                onPress={handleDownloadImage}
+                loading={savingImage}
+              />
+              <PrimaryButton
+                label="Share receipt image"
+                variant="outline"
+                onPress={handleShareImage}
+                disabled={savingImage}
+              />
+              {bluetoothPrintService.isSupported() ? (
+                <PrimaryButton
+                  label={printing ? 'Printing…' : 'Print bill via Bluetooth'}
+                  onPress={handlePrint}
+                  loading={printing}
+                />
+              ) : null}
+              <PrimaryButton
+                label="New purchase"
+                variant={bluetoothPrintService.isSupported() ? 'outline' : 'primary'}
+                onPress={() =>
+                  navigation.dispatch(
+                    CommonActions.reset({
+                      index: 0,
+                      routes: [{ name: 'PurchaseCreate' }],
+                    }),
+                  )
+                }
+              />
+              <PrimaryButton
+                label="Purchase list"
+                variant="outline"
+                onPress={() => navigation.navigate('PurchasesList')}
+              />
+            </>
+          )}
         </Box>
       </SmoothScrollView>
     </ScreenContainer>

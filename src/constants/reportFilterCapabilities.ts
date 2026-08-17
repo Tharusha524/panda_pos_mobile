@@ -10,7 +10,6 @@ import type { SystemReportType } from '@/types/reports';
 const DATE_FILTER_UNSUPPORTED: ReadonlySet<SystemReportType> = new Set<SystemReportType>([
   'daily_summary', // fixed to today (dashboard API takes no date params)
   'customer_report', // live current balances, not date-scoped
-  'credit_sales', // live current balances, not date-scoped
   'item_report', // live current stock, not date-scoped
   'reorder', // live current stock, not date-scoped
   'customer_aging', // live current balances, not date-scoped

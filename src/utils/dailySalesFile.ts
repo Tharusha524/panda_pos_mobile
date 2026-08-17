@@ -7,16 +7,18 @@ import type { SalesSummarySale } from '@/types/backendReports';
 const EXCEL_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-const fileNameFor = (dateYmd: string): string => `Daily-Sale-Report-${dateYmd}.xlsx`;
+const fileNameFor = (dateYmd: string, title: string): string =>
+  `${title.replace(/\s+/g, '-')}-${dateYmd}.xlsx`;
 
 async function writeWorkbookTo(
   dirPath: string,
   sales: SalesSummarySale[],
   dateYmd: string,
   dateLabel: string,
+  title: string,
 ): Promise<{ path: string; isEmpty: boolean }> {
-  const { base64, isEmpty } = await buildDailySalesWorkbookBase64(sales, dateLabel);
-  const path = `${dirPath}/${fileNameFor(dateYmd)}`;
+  const { base64, isEmpty } = await buildDailySalesWorkbookBase64(sales, dateLabel, title);
+  const path = `${dirPath}/${fileNameFor(dateYmd, title)}`;
   if (await RNBlobUtil.fs.exists(path)) {
     await RNBlobUtil.fs.unlink(path);
   }
@@ -31,8 +33,9 @@ export async function downloadDailySalesExcel(
   sales: SalesSummarySale[],
   dateYmd: string,
   dateLabel: string,
+  title: string = 'Daily Sale Report',
 ): Promise<string> {
-  const fileName = fileNameFor(dateYmd);
+  const fileName = fileNameFor(dateYmd, title);
 
   if (Platform.OS === 'android') {
     const { path, isEmpty } = await writeWorkbookTo(
@@ -40,19 +43,20 @@ export async function downloadDailySalesExcel(
       sales,
       dateYmd,
       dateLabel,
+      title,
     );
     // Registers the file with Android's Downloads app/notification so it
     // actually shows up there — a plain write alone leaves it invisible to
     // anything but a raw file browser.
     await RNBlobUtil.android.addCompleteDownload({
       title: fileName,
-      description: `Daily sale report for ${dateLabel}`,
+      description: `${title} for ${dateLabel}`,
       mime: EXCEL_MIME,
       path,
       showNotification: true,
     });
     return isEmpty
-      ? `${fileName} saved to Downloads (no sales recorded that day).`
+      ? `${fileName} saved to Downloads (no sales recorded for this period).`
       : `${fileName} saved to Downloads.`;
   }
 
@@ -61,9 +65,10 @@ export async function downloadDailySalesExcel(
     sales,
     dateYmd,
     dateLabel,
+    title,
   );
   return isEmpty
-    ? `${fileName} saved (no sales recorded that day). Find it via the Files app.`
+    ? `${fileName} saved (no sales recorded for this period). Find it via the Files app.`
     : `${fileName} saved. Find it via the Files app.`;
 }
 
@@ -76,18 +81,20 @@ export async function shareDailySalesExcel(
   sales: SalesSummarySale[],
   dateYmd: string,
   dateLabel: string,
+  title: string = 'Daily Sale Report',
 ): Promise<void> {
   const { path } = await writeWorkbookTo(
     RNBlobUtil.fs.dirs.CacheDir,
     sales,
     dateYmd,
     dateLabel,
+    title,
   );
 
   await Share.open({
     url: `file://${path}`,
     type: EXCEL_MIME,
-    filename: fileNameFor(dateYmd),
+    filename: fileNameFor(dateYmd, title),
     title: 'Share Excel report',
     // Cancelling the chooser is a normal outcome, not a failure — without
     // this the promise rejects on cancel and the caller shows an error toast

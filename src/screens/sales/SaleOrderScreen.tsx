@@ -41,7 +41,14 @@ import {
   needsPaymentReference,
   resolveCreditPaymentMethod,
 } from '@/utils/paymentMethod';
-import type { CartLine, SaleReceiptPayload } from '@/types/sales';
+import {
+  TRANSACTION_TYPE_EXCHANGE,
+  TRANSACTION_TYPE_RETURN,
+  TRANSACTION_TYPE_SALE,
+  type CartLine,
+  type ReceiptLine,
+  type SaleReceiptPayload,
+} from '@/types/sales';
 import {
   colors,
   appInputStyle,
@@ -622,33 +629,112 @@ export const SaleOrderScreen: React.FC = () => {
       cardLast4: paymentCardLast4,
     });
 
-    const result = await pos.completeSale({
-      payment_method: paymentMethod,
-      amount_received: received,
-      bank_id: needsBank(paymentMethod) ? bankId : null,
-      cheque_number: /cheque/i.test(paymentMethod) ? chequeNumber.trim() || undefined : undefined,
-      notes: paymentNotes,
-      refund_card_last4: needsRefundCard ? refundDigits : null,
-      hold_pin: holdPin,
-      original_sale_id:
-        pos.isReturn || pos.isExchange ? originalSaleId.trim() || null : null,
-      cart: checkoutCart,
+    // Nothing is saved yet — render the actual receipt (same component used once
+    // it's really saved) from local data, so what's reviewed here is a true
+    // preview of what prints, not just a numbers summary. A few fields that only
+    // exist after the server assigns them (e.g. the exact save timestamp) are
+    // filled with their expected local values and get overwritten by the real
+    // ones on the printed copy.
+    const customerName =
+      pos.customer && !isWalkInCustomer(pos.customer)
+        ? pos.customer.customer_name
+        : 'Walk-in Customer';
+
+    const draftLines: ReceiptLine[] = checkoutCart.map(line => ({
+      item_number: line.item_number,
+      description: line.description,
+      qty: line.qty,
+      unit_price: line.unit_price,
+      line_total: line.line_total,
+      uom: line.uom,
+      line_direction: pos.isExchange ? (line.line_direction ?? 'sale') : undefined,
+    }));
+
+    const draftReceipt: SaleReceiptPayload = {
+      sale: {
+        sales_id: pos.activeHoldSalesId ?? pos.salesId,
+        transaction_type: pos.isExchange
+          ? TRANSACTION_TYPE_EXCHANGE
+          : pos.isReturn
+            ? TRANSACTION_TYPE_RETURN
+            : TRANSACTION_TYPE_SALE,
+        is_return: pos.isReturn,
+        is_exchange: pos.isExchange,
+        order_status: 'completed',
+        discount_type: pos.orderDiscountType,
+        discount_percent: pos.discountPercent,
+        sale_date: new Date().toISOString(),
+        location: pos.location,
+        payment_method: paymentMethod,
+        customer_name: customerName,
+        customer_code: pos.customer?.customer_code ?? null,
+        customer_contact_no: pos.customer?.contact_no ?? null,
+        customer_email: pos.customer?.email ?? null,
+        customer_location: pos.customer?.location ?? null,
+        customer_route: pos.customer?.route ?? null,
+        customer_address: pos.customer?.address ?? null,
+        customer_tax_id: pos.customer?.tax_id ?? null,
+        sub_total: pos.isExchange ? previewSaleSubTotal : previewSubTotal,
+        return_sub_total: pos.isExchange ? previewReturnSubTotal : undefined,
+        discount: pos.discount,
+        net_amount: previewOrderTotal,
+        amount_received: received,
+        lines: draftLines,
+      },
+      header: {},
+      hardware_settings: (settings?.hardware ?? {}) as Record<string, unknown>,
+      print_options: {},
+      labels: {},
+    };
+
+    // Land on the real receipt screen in "review" mode instead of a popup —
+    // it's the same screen/layout already used for the saved receipt (proven
+    // to lay out correctly), just with Edit/Confirm in place of print/share.
+    navigation.navigate('SaleReceipt', {
+      receipt: draftReceipt,
+      pendingConfirm: {
+        title: pos.isExchange
+          ? 'Confirm exchange'
+          : pos.isReturn
+            ? 'Confirm return'
+            : completingHold
+              ? 'Confirm sale (from hold)'
+              : 'Confirm sale',
+        confirmLabel: isRefundDue || pos.isReturn ? 'Confirm & Refund' : 'Confirm & Print',
+        onEdit: () => navigation.goBack(),
+        onConfirm: async () => {
+          const result = await pos.completeSale({
+            payment_method: paymentMethod,
+            amount_received: received,
+            bank_id: needsBank(paymentMethod) ? bankId : null,
+            cheque_number: /cheque/i.test(paymentMethod)
+              ? chequeNumber.trim() || undefined
+              : undefined,
+            notes: paymentNotes,
+            refund_card_last4: needsRefundCard ? refundDigits : null,
+            hold_pin: holdPin,
+            original_sale_id:
+              pos.isReturn || pos.isExchange ? originalSaleId.trim() || null : null,
+            cart: checkoutCart,
+          });
+
+          if (!result) {
+            return;
+          }
+
+          if (completingHold && holdPin && !savedHoldPin) {
+            await saveHoldPin(holdPin);
+          }
+
+          if (needsRefundCard && refundDigits.length === 4 && !savedRefundCardLast4) {
+            await refundCardStorage.save(refundDigits);
+            setSavedRefundCardLast4(refundDigits);
+          }
+
+          await deliverReceipt(result.receipt);
+        },
+      },
     });
-
-    if (!result) {
-      return;
-    }
-
-    if (completingHold && holdPin && !savedHoldPin) {
-      await saveHoldPin(holdPin);
-    }
-
-    if (needsRefundCard && refundDigits.length === 4 && !savedRefundCardLast4) {
-      await refundCardStorage.save(refundDigits);
-      setSavedRefundCardLast4(refundDigits);
-    }
-
-    await deliverReceipt(result.receipt);
   };
 
   const handleHold = async () => {

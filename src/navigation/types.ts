@@ -8,6 +8,17 @@ import type { SystemReportType, ReportCategoryId } from '@/types/reports';
 
 export type TodayActivityTab = 'sales' | 'purchases' | 'reorder';
 
+/** Passed to a receipt screen to put it in "review before saving" mode instead
+ * of its normal "already saved, print/share/download" mode — used so the
+ * confirm-before-save review reuses the real receipt screen's own layout
+ * (already correct/proven) instead of squeezing a receipt into a small popup. */
+export interface PendingConfirm {
+  title: string;
+  confirmLabel: string;
+  onConfirm: () => Promise<void>;
+  onEdit: () => void;
+}
+
 export type HomeStackParamList = {
   Dashboard: undefined;
   TodayActivity: { tab?: TodayActivityTab } | undefined;
@@ -17,7 +28,7 @@ export type HomeStackParamList = {
   CustomerReceivePayment: { customerId: number };
   CustomerHistory: { customerId: number };
   CustomerSaleReceipt: { receipt: SaleReceiptPayload; customerId?: number | null };
-  PaymentReceipt: { receipt: PaymentReceiptPayload };
+  PaymentReceipt: { receipt: PaymentReceiptPayload; pendingConfirm?: PendingConfirm };
   PaymentDetailReceipt: { payment: PaymentDetailPayload };
   ExpensesList: undefined;
   ExpenseForm: { expenseId?: number };
@@ -42,7 +53,11 @@ export type AppStackParamList = {
 export type SalesStackParamList = {
   SalesPOS: undefined;
   SaleOrder: undefined;
-  SaleReceipt: { receipt: SaleReceiptPayload; customerId?: number | null };
+  SaleReceipt: {
+    receipt: SaleReceiptPayload;
+    customerId?: number | null;
+    pendingConfirm?: PendingConfirm;
+  };
   HoldOrders: undefined;
   CustomerForm: { customerId?: number; selectOnSave?: boolean };
 };
@@ -60,7 +75,7 @@ export type ProductsStackParamList = {
   PurchasesList: undefined;
   PurchaseCreate: undefined;
   PurchaseOrder: undefined;
-  PurchaseReceipt: { receipt: PurchaseReceiptPayload };
+  PurchaseReceipt: { receipt: PurchaseReceiptPayload; pendingConfirm?: PendingConfirm };
 };
 
 export type SettingsStackParamList = {

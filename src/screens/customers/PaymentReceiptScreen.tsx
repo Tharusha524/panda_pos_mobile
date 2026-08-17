@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { View } from 'react-native';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import ViewShot, { type ViewShotRef } from 'react-native-view-shot';
-import { Box } from '@gluestack-ui/themed';
+import { Box, Text } from '@gluestack-ui/themed';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
@@ -20,7 +20,7 @@ import {
   shareReceiptImageFile,
 } from '@/utils/receiptImageShare';
 import { getReceiptPrintCustomization, buildPrintHeaderFromSettings } from '@/utils/receiptPrintCustomization';
-import { TAB_BAR_SCROLL_PADDING } from '@/theme';
+import { colors, TAB_BAR_SCROLL_PADDING } from '@/theme';
 import type { HomeStackParamList } from '@/navigation/types';
 
 type Route = RouteProp<HomeStackParamList, 'PaymentReceipt'>;
@@ -38,11 +38,25 @@ export const PaymentReceiptScreen: React.FC = () => {
   const { showError, showConfirm } = useErrorDialog();
   const [printing, setPrinting] = useState(false);
   const [savingImage, setSavingImage] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const receiptShotRef = useRef<ViewShotRef>(null);
 
   const canPrint = bluetoothPrintService.isSupported();
   const header = buildPrintHeaderFromSettings(settings);
   const { result, notes } = params.receipt;
+  const { pendingConfirm } = params;
+
+  const handleConfirmPending = async () => {
+    if (!pendingConfirm) {
+      return;
+    }
+    setConfirming(true);
+    try {
+      await pendingConfirm.onConfirm();
+    } finally {
+      setConfirming(false);
+    }
+  };
 
   const promptPrinterSetup = (message: string) => {
     showConfirm({
@@ -122,10 +136,19 @@ export const PaymentReceiptScreen: React.FC = () => {
   return (
     <ScreenContainer>
       <AppHeader
-        title="Payment receipt"
+        title={pendingConfirm ? pendingConfirm.title : 'Payment receipt'}
         subtitle={result.customer.customer_name}
         showBack
       />
+
+      {pendingConfirm ? (
+        <Box px="$4" pt="$2">
+          <Text size="xs" color={colors.textMuted}>
+            Please check every detail below — this cannot be edited after it&apos;s
+            confirmed.
+          </Text>
+        </Box>
+      ) : null}
 
       <SmoothScrollView
         contentContainerStyle={{ padding: 16, alignItems: 'center' }}
@@ -140,26 +163,44 @@ export const PaymentReceiptScreen: React.FC = () => {
         </View>
 
         <Box w="100%" maxWidth={400} gap="$2" mt="$3">
-          <PrimaryButton
-            label={savingImage ? 'Saving…' : 'Download receipt image'}
-            variant="outline"
-            onPress={handleDownloadImage}
-            loading={savingImage}
-          />
-          <PrimaryButton
-            label="Share receipt image"
-            variant="outline"
-            onPress={handleShareImage}
-            disabled={savingImage}
-          />
+          {pendingConfirm ? (
+            <>
+              <PrimaryButton
+                label={pendingConfirm.confirmLabel}
+                onPress={handleConfirmPending}
+                loading={confirming}
+              />
+              <PrimaryButton
+                label="Edit"
+                variant="outline"
+                onPress={pendingConfirm.onEdit}
+                disabled={confirming}
+              />
+            </>
+          ) : (
+            <>
+              <PrimaryButton
+                label={savingImage ? 'Saving…' : 'Download receipt image'}
+                variant="outline"
+                onPress={handleDownloadImage}
+                loading={savingImage}
+              />
+              <PrimaryButton
+                label="Share receipt image"
+                variant="outline"
+                onPress={handleShareImage}
+                disabled={savingImage}
+              />
 
-          <ReceiptActions
-            showPrint={canPrint}
-            onPrint={canPrint ? handlePrint : undefined}
-            onNewSale={() => navigation.goBack()}
-            secondaryLabel="Done"
-            printLoading={printing}
-          />
+              <ReceiptActions
+                showPrint={canPrint}
+                onPrint={canPrint ? handlePrint : undefined}
+                onNewSale={() => navigation.goBack()}
+                secondaryLabel="Done"
+                printLoading={printing}
+              />
+            </>
+          )}
         </Box>
       </SmoothScrollView>
     </ScreenContainer>

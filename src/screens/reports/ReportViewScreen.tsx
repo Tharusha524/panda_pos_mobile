@@ -34,6 +34,7 @@ import type { ReportFilterParams } from '@/types/reportFilters';
 import { captureReceiptBase64 } from '@/utils/receiptImageShare';
 import { supportsDateFilter, supportsItemFilter } from '@/constants/reportFilterCapabilities';
 import { downloadDailySalesExcel, shareDailySalesExcel } from '@/utils/dailySalesFile';
+import { downloadReportTableExcel, shareReportTableExcel } from '@/utils/reportTableFile';
 import {
   buildPrintHeaderFromSettings as buildHeader,
   getReceiptPrintCustomization,
@@ -66,6 +67,18 @@ export const ReportViewScreen: React.FC = () => {
   // type pick any past day and see/export that day's sales, without touching
   // the existing today-only dashboard flow above.
   const isDailySummary = params.type === 'daily_summary';
+  // Sales report already has its own date-range picker (ReportFilterBar
+  // below) — it reuses the same Excel pivot as Daily Business Summary, just
+  // fed that range's sales instead of a single day's, no extra UI needed.
+  const isSalesReport = params.type === 'sales_report';
+  const pivotExcelSupported = isDailySummary || isSalesReport;
+  // Return report and Customer Settlement are already a flat column/row
+  // table (see reportPayload on the backend) — exported as-is via the
+  // generic table exporter instead of the item-level sales pivot above.
+  const isReturnReport = params.type === 'return_report';
+  const isCustomerSettlement = params.type === 'customer_settlement';
+  const genericExcelSupported = isReturnReport || isCustomerSettlement;
+  const excelExportSupported = pivotExcelSupported || genericExcelSupported;
   const today = useMemo(() => formatDateYmd(new Date()), []);
   const [salesReportDate, setSalesReportDate] = useState(today);
   const isPastDateSelected = isDailySummary && salesReportDate !== today;
@@ -74,15 +87,22 @@ export const ReportViewScreen: React.FC = () => {
   const [dailySalesError, setDailySalesError] = useState<string | null>(null);
   const [exportingExcel, setExportingExcel] = useState<'download' | 'share' | null>(null);
 
+  // Sales report / Return report / Customer Settlement all use the normal
+  // filter bar's date range; only Daily Business Summary has its own
+  // single-day picker (salesReportDate above).
+  const usesFilterDateRange = isSalesReport || genericExcelSupported;
+  const excelDateFrom = usesFilterDateRange ? filters.dateFrom : salesReportDate;
+  const excelDateTo = usesFilterDateRange ? filters.dateTo : salesReportDate;
+
   useEffect(() => {
-    if (!isDailySummary) {
+    if (!pivotExcelSupported) {
       return;
     }
     let cancelled = false;
     setDailySalesLoading(true);
     setDailySalesError(null);
     reportService
-      .fetch('sales-summary', { dateFrom: salesReportDate, dateTo: salesReportDate })
+      .fetch('sales-summary', { dateFrom: excelDateFrom, dateTo: excelDateTo })
       .then(report => {
         if (!cancelled) {
           setDailySalesReport(report);
@@ -90,7 +110,7 @@ export const ReportViewScreen: React.FC = () => {
       })
       .catch(e => {
         if (!cancelled) {
-          setDailySalesError(e instanceof Error ? e.message : 'Failed to load sales for this day');
+          setDailySalesError(e instanceof Error ? e.message : 'Failed to load sales for this period');
         }
       })
       .finally(() => {
@@ -101,29 +121,55 @@ export const ReportViewScreen: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [isDailySummary, salesReportDate]);
+  }, [pivotExcelSupported, excelDateFrom, excelDateTo]);
 
   const handleExportExcel = async (action: 'download' | 'share') => {
-    if (!dailySalesReport) {
-      showError({
-        title: 'Excel export',
-        message: 'Sales for this day are still loading — try again in a moment.',
-        variant: 'warning',
-      });
-      return;
-    }
+    const dateKey = usesFilterDateRange
+      ? `${excelDateFrom}_to_${excelDateTo}`
+      : excelDateFrom;
+    const dateLabel = usesFilterDateRange
+      ? formatReportDateRangeLabel(excelDateFrom, excelDateTo)
+      : formatReportDateLabel(excelDateFrom);
+
     setExportingExcel(action);
     try {
-      const dateLabel = formatReportDateLabel(salesReportDate);
+      if (genericExcelSupported) {
+        if (!result || result.source !== 'backend') {
+          showError({
+            title: 'Excel export',
+            message: 'This report is still loading — try again in a moment.',
+            variant: 'warning',
+          });
+          return;
+        }
+        if (action === 'download') {
+          const message = await downloadReportTableExcel(result.report, dateKey, dateLabel);
+          showError({ title: 'Excel saved', message, variant: 'info', confirmLabel: 'OK' });
+        } else {
+          await shareReportTableExcel(result.report, dateKey, dateLabel);
+        }
+        return;
+      }
+
+      if (!dailySalesReport) {
+        showError({
+          title: 'Excel export',
+          message: 'Sales for this period are still loading — try again in a moment.',
+          variant: 'warning',
+        });
+        return;
+      }
+      const title = isSalesReport ? 'Sales Report' : 'Daily Sale Report';
       if (action === 'download') {
         const message = await downloadDailySalesExcel(
           dailySalesReport.sales ?? [],
-          salesReportDate,
+          dateKey,
           dateLabel,
+          title,
         );
         showError({ title: 'Excel saved', message, variant: 'info', confirmLabel: 'OK' });
       } else {
-        await shareDailySalesExcel(dailySalesReport.sales ?? [], salesReportDate, dateLabel);
+        await shareDailySalesExcel(dailySalesReport.sales ?? [], dateKey, dateLabel, title);
       }
     } catch (e) {
       showError({
@@ -345,7 +391,7 @@ export const ReportViewScreen: React.FC = () => {
                 loading={printing}
                 disabled={!result}
               />
-              {isDailySummary ? (
+              {excelExportSupported ? (
                 <>
                   <PrimaryButton
                     label={exportingExcel === 'download' ? 'Saving…' : 'Download Excel'}
