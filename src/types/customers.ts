@@ -20,6 +20,8 @@ export interface ReceivePaymentPayload {
   payment_method?: string;
   notes?: string | null;
   location?: string | null;
+  cheque_number?: string | null;
+  bank_name?: string | null;
 }
 
 export interface ReceivePaymentResult {
@@ -28,6 +30,8 @@ export interface ReceivePaymentResult {
   previous_balance: number;
   new_balance: number;
   payment_method: string;
+  cheque_number?: string | null;
+  bank_name?: string | null;
 }
 
 /** Passed to the payment receipt review screen — same payment result the "old

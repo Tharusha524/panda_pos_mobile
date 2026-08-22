@@ -70,7 +70,10 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
   const [customer, setCustomer] = useState<CustomerSummary | null>(null);
   const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
+  const [chequeNumber, setChequeNumber] = useState('');
+  const [bankName, setBankName] = useState('');
   const [notes, setNotes] = useState('');
+  const isCheque = paymentMethod === 'Cheque';
   const statementShotRef = useRef<ViewShotRef>(null);
 
   useEffect(() => {
@@ -134,6 +137,8 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
     // "review" mode (same layout used once it's really recorded), and let the
     // user back out (Edit) to fix the amount/method before it's recorded.
     const paidNotes = notes;
+    const paidChequeNumber = isCheque ? chequeNumber.trim() || null : null;
+    const paidBankName = isCheque ? bankName.trim() || null : null;
     navigation.navigate('PaymentReceipt', {
       receipt: {
         result: {
@@ -142,6 +147,8 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
           previous_balance: outstanding,
           new_balance: newBalance,
           payment_method: paymentMethod,
+          cheque_number: paidChequeNumber,
+          bank_name: paidBankName,
         },
         notes: paidNotes || null,
       },
@@ -155,6 +162,8 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
               amount: amountNum,
               payment_method: paymentMethod,
               notes: paidNotes.trim() || null,
+              cheque_number: paidChequeNumber,
+              bank_name: paidBankName,
             });
             notifyRefresh(['customers', 'sales', 'dashboard', 'reports']);
             navigation.replace('PaymentReceipt', {
@@ -310,6 +319,27 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
                 onSelect={setPaymentMethod}
                 showAllOption={false}
               />
+
+              {isCheque ? (
+                <>
+                  <Label>Bank name (optional)</Label>
+                  <TextInput
+                    value={bankName}
+                    onChangeText={setBankName}
+                    style={appInputStyle}
+                    placeholder="e.g. BOC"
+                    placeholderTextColor={appInputPlaceholderColor}
+                  />
+                  <Label>Cheque number (optional)</Label>
+                  <TextInput
+                    value={chequeNumber}
+                    onChangeText={setChequeNumber}
+                    style={appInputStyle}
+                    placeholder="Enter cheque number"
+                    placeholderTextColor={appInputPlaceholderColor}
+                  />
+                </>
+              ) : null}
 
               <Label>Notes (optional)</Label>
               <TextInput

@@ -139,6 +139,12 @@ export const buildEscPosPaymentReceipt = (
   // 'left' explicitly — sits among left-anchored ledger rows, same convention as
   // "Paid By" on sale receipts.
   lines.push(escLine(ctx, `Paid By ${result.payment_method}`, 'left'));
+  if (result.bank_name?.trim()) {
+    lines.push(escLine(ctx, `Bank: ${result.bank_name.trim()}`, 'left'));
+  }
+  if (result.cheque_number?.trim()) {
+    lines.push(escLine(ctx, `Cheque #: ${result.cheque_number.trim()}`, 'left'));
+  }
   if (notes?.trim()) {
     lines.push(escLine(ctx, `Notes: ${notes.trim()}`.slice(0, ctx.lineWidth), 'left'));
   }

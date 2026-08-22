@@ -43,7 +43,7 @@ export const SmoothScrollView = React.forwardRef<ScrollView, SmoothScrollViewPro
       <ScrollView
         ref={ref}
         horizontal={horizontal}
-        style={[styles.scroll, style]}
+        style={[horizontal ? styles.scrollHorizontal : styles.scroll, style]}
         contentContainerStyle={containerStyle}
         {...scrollProps}
         {...props}>
@@ -58,5 +58,13 @@ SmoothScrollView.displayName = 'SmoothScrollView';
 const styles = StyleSheet.create({
   scroll: {
     flex: 1,
+  },
+  // flex: 1 only makes sense for the vertical (full-screen) case above — a
+  // horizontal chip strip is normally nested inside a card/section that
+  // sizes to its content, not a flex container, so flex: 1 there collapses
+  // the scroller to zero height (nothing to "grow" into). Let it size to
+  // its content instead.
+  scrollHorizontal: {
+    flexGrow: 0,
   },
 });

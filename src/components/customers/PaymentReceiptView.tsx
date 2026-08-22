@@ -123,6 +123,12 @@ export const PaymentReceiptView: React.FC<PaymentReceiptViewProps> = ({
       </View>
 
       <Text style={[styles.paidBy, bodyText(13)]}>Paid By {result.payment_method}</Text>
+      {result.bank_name?.trim() ? (
+        <Text style={[styles.notes, bodyText(12)]}>Bank: {result.bank_name.trim()}</Text>
+      ) : null}
+      {result.cheque_number?.trim() ? (
+        <Text style={[styles.notes, bodyText(12)]}>Cheque #: {result.cheque_number.trim()}</Text>
+      ) : null}
       {notes?.trim() ? (
         <Text style={[styles.notes, bodyText(12)]}>Notes: {notes.trim()}</Text>
       ) : null}
