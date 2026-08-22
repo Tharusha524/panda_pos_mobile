@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -7,7 +7,9 @@ import {
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
+  View,
 } from 'react-native';
+import ViewShot, { type ViewShotRef } from 'react-native-view-shot';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -20,12 +22,17 @@ import { AppHeader } from '@/components/common/AppHeader';
 import { FilterChips } from '@/components/common/FilterChips';
 import { PrimaryButton } from '@/components/buttons/PrimaryButton';
 import { LoadingOverlay } from '@/components/common/LoadingOverlay';
+import { CustomerStatementReceiptView } from '@/components/customers/CustomerStatementReceiptView';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { useDataRefreshNotify } from '@/context/DataRefreshContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { customerService } from '@/services/api/customerService';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
-import { buildPrintHeaderFromSettings } from '@/utils/receiptPrintCustomization';
+import {
+  buildPrintHeaderFromSettings,
+  getReceiptPrintCustomization,
+} from '@/utils/receiptPrintCustomization';
+import { captureReceiptBase64 } from '@/utils/receiptImageShare';
 import { formatCurrency } from '@/utils/format';
 import {
   colors,
@@ -54,17 +61,20 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
   const { currency, settings } = usePosSettings();
-  const { showError, showErrorFromUnknown, showConfirm } = useErrorDialog();
+  const { showError, showErrorFromUnknown } = useErrorDialog();
   const notifyRefresh = useDataRefreshNotify();
   const customerId = route.params.customerId;
 
   const [loading, setLoading] = useState(true);
   const [printing, setPrinting] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [customer, setCustomer] = useState<CustomerSummary | null>(null);
   const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
+  const [chequeNumber, setChequeNumber] = useState('');
+  const [bankName, setBankName] = useState('');
   const [notes, setNotes] = useState('');
+  const isCheque = paymentMethod === 'Cheque';
+  const statementShotRef = useRef<ViewShotRef>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,8 +102,9 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
   const outstanding = Math.max(0, customer?.net_balance ?? 0);
   const amountNum = parseFloat(amount.replace(/,/g, '')) || 0;
   const newBalance = Math.max(0, Math.round((outstanding - amountNum) * 100) / 100);
+  const printHeader = buildPrintHeaderFromSettings(settings);
 
-  const handleReceive = async () => {
+  const handleReceive = () => {
     if (!customer) {
       return;
     }
@@ -122,45 +133,76 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
       return;
     }
 
-    setSubmitting(true);
-    try {
-      const result = await customerService.receivePayment(customer.id, {
-        amount: amountNum,
-        payment_method: paymentMethod,
-        notes: notes.trim() || null,
-      });
-      notifyRefresh(['customers', 'sales', 'dashboard', 'reports']);
-      const paidNotes = notes;
-      showConfirm({
-        title: 'Payment recorded',
-        message: `Received ${formatCurrency(result.payment_received, currency)} from ${customer.customer_name}. New balance: ${formatCurrency(result.new_balance, currency)}.`,
-        confirmLabel: 'Print Receipt',
-        cancelLabel: 'Done',
-        onConfirm: () => {
-          const header = buildPrintHeaderFromSettings(settings);
-          bluetoothPrintService
-            .printPaymentReceipt(result, header, paidNotes, settings)
-            .catch(e => showErrorFromUnknown(e, 'Print receipt'));
+    // Nothing is saved yet — land on the real payment receipt screen in
+    // "review" mode (same layout used once it's really recorded), and let the
+    // user back out (Edit) to fix the amount/method before it's recorded.
+    const paidNotes = notes;
+    const paidChequeNumber = isCheque ? chequeNumber.trim() || null : null;
+    const paidBankName = isCheque ? bankName.trim() || null : null;
+    navigation.navigate('PaymentReceipt', {
+      receipt: {
+        result: {
+          customer,
+          payment_received: amountNum,
+          previous_balance: outstanding,
+          new_balance: newBalance,
+          payment_method: paymentMethod,
+          cheque_number: paidChequeNumber,
+          bank_name: paidBankName,
         },
-      });
-      navigation.goBack();
-    } catch (e) {
-      showErrorFromUnknown(e, 'Receive payment');
-    } finally {
-      setSubmitting(false);
-    }
+        notes: paidNotes || null,
+      },
+      pendingConfirm: {
+        title: 'Confirm payment',
+        confirmLabel: 'Confirm & Print',
+        onEdit: () => navigation.goBack(),
+        onConfirm: async () => {
+          try {
+            const result = await customerService.receivePayment(customer.id, {
+              amount: amountNum,
+              payment_method: paymentMethod,
+              notes: paidNotes.trim() || null,
+              cheque_number: paidChequeNumber,
+              bank_name: paidBankName,
+            });
+            notifyRefresh(['customers', 'sales', 'dashboard', 'reports']);
+            navigation.replace('PaymentReceipt', {
+              receipt: { result, notes: paidNotes || null },
+            });
+          } catch (e) {
+            showErrorFromUnknown(e, 'Receive payment');
+          }
+        },
+      },
+    });
   };
 
   // Standalone — prints the customer's current details/balance any time, independent
-  // of actually receiving a payment right now.
+  // of actually receiving a payment right now. Same button, no extra tap: captures
+  // the hidden preview below as an image first when "print receipt as image" is on,
+  // otherwise falls back to the plain text printout as before.
   const handlePrintStatement = async () => {
     if (!customer) {
       return;
     }
     setPrinting(true);
     try {
-      const header = buildPrintHeaderFromSettings(settings);
-      await bluetoothPrintService.printCustomerStatement(customer, header, settings);
+      let capturedImageBase64: string | undefined;
+      try {
+        const customization = await getReceiptPrintCustomization(settings);
+        if (customization.printAsImage) {
+          capturedImageBase64 = await captureReceiptBase64(statementShotRef);
+        }
+      } catch {
+        // Couldn't read the setting or capture the preview — fall back to the
+        // normal text receipt below instead of blocking the print entirely.
+      }
+      await bluetoothPrintService.printCustomerStatement(
+        customer,
+        printHeader,
+        settings,
+        capturedImageBase64,
+      );
     } catch (e) {
       showErrorFromUnknown(e, 'Print customer details');
     } finally {
@@ -278,6 +320,27 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
                 showAllOption={false}
               />
 
+              {isCheque ? (
+                <>
+                  <Label>Bank name (optional)</Label>
+                  <TextInput
+                    value={bankName}
+                    onChangeText={setBankName}
+                    style={appInputStyle}
+                    placeholder="e.g. BOC"
+                    placeholderTextColor={appInputPlaceholderColor}
+                  />
+                  <Label>Cheque number (optional)</Label>
+                  <TextInput
+                    value={chequeNumber}
+                    onChangeText={setChequeNumber}
+                    style={appInputStyle}
+                    placeholder="Enter cheque number"
+                    placeholderTextColor={appInputPlaceholderColor}
+                  />
+                </>
+              ) : null}
+
               <Label>Notes (optional)</Label>
               <TextInput
                 value={notes}
@@ -292,7 +355,6 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
                 <PrimaryButton
                   label="Receive payment"
                   onPress={handleReceive}
-                  loading={submitting}
                   disabled={loading || outstanding <= 0}
                 />
               </VStack>
@@ -300,6 +362,19 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
           </SmoothScrollView>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
+
+      {customer ? (
+        // Off-screen — never shown to the cashier, only captured as an image when
+        // "print receipt as image" is on (see handlePrintStatement above).
+        <View style={styles.hiddenCapture} collapsable={false} pointerEvents="none">
+          <ViewShot
+            ref={statementShotRef}
+            options={{ format: 'png', quality: 1, result: 'tmpfile' }}
+            style={styles.hiddenCaptureInner}>
+            <CustomerStatementReceiptView customer={customer} header={printHeader} settings={settings} />
+          </ViewShot>
+        </View>
+      ) : null}
     </ScreenContainer>
   );
 };
@@ -309,6 +384,15 @@ const styles = StyleSheet.create({
   scroll: {
     paddingHorizontal: 20,
     paddingTop: 12,
+  },
+  hiddenCapture: {
+    position: 'absolute',
+    top: 0,
+    left: -2000,
+    width: 400,
+  },
+  hiddenCaptureInner: {
+    backgroundColor: '#fff',
   },
   customerCard: {
     backgroundColor: colors.white,

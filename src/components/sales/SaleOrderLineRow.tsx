@@ -22,6 +22,9 @@ interface SaleOrderLineRowProps {
   qtyDraft: string;
   priceDraft?: string;
   allowEditPrice?: boolean;
+  /** Lets a return-direction line's price be edited too — Exchange mode only
+   * (a plain Return still returns at the original sold price by default). */
+  allowEditReturnPrice?: boolean;
   lineTotal: number;
   offerDiscount: number;
   isReturn: boolean;
@@ -45,6 +48,7 @@ export const SaleOrderLineRow: React.FC<SaleOrderLineRowProps> = ({
   qtyDraft,
   priceDraft,
   allowEditPrice = false,
+  allowEditReturnPrice = false,
   lineTotal,
   offerDiscount,
   isReturn,
@@ -70,7 +74,7 @@ export const SaleOrderLineRow: React.FC<SaleOrderLineRowProps> = ({
   const imageUri = localImage;
   const hasOffer = offerDiscount > 0;
   const unitPriceLabel = formatPricePerUom(formatCurrency(line.unit_price, currency), uom);
-  const canEditPrice = allowEditPrice && !isReturn;
+  const canEditPrice = allowEditPrice && (!isReturn || allowEditReturnPrice);
 
   return (
     <View

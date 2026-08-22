@@ -2,11 +2,7 @@ import React from 'react';
 import { Image, StyleSheet, View, type TextStyle } from 'react-native';
 import { HStack, Text, VStack } from '@gluestack-ui/themed';
 import { useReceiptLogoUri } from '@/hooks/useReceiptLogoUri';
-import { useReceiptPrintCustomization } from '@/hooks/useReceiptPrintCustomization';
-import {
-  DEFAULT_RECEIPT_PRINT_CUSTOMIZATION,
-  type ReceiptTextWeight,
-} from '@/types/receiptPrint';
+import { useReceiptStyleScale } from '@/hooks/useReceiptStyleScale';
 import {
   DEFAULT_RECEIPT_STORE_NAME,
   getSaleReceiptTitle,
@@ -28,21 +24,17 @@ interface SaleReceiptViewProps {
    * by the Receipt layout settings screen so its live preview reflects in-progress,
    * not-yet-saved changes instantly instead of lagging a save behind. */
   customizationOverride?: ReceiptPrintCustomization;
+  /** Customer's total amount owed overall (across all their past sales) — distinct
+   * from this bill's own total above. Only shown when the caller resolved and
+   * supplied a real customer's current balance; omit for walk-in sales. */
+  customerOutstandingBalance?: number | null;
 }
-
-const WEIGHT_MAP: Record<ReceiptTextWeight, TextStyle['fontWeight']> = {
-  regular: '400',
-  medium: '600',
-  bold: '700',
-};
-
-// The logo's original box was 120×56 — keep that aspect ratio as its width is resized.
-const LOGO_ASPECT_RATIO = 56 / 120;
 
 export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
   receipt,
   settings,
   customizationOverride,
+  customerOutstandingBalance,
 }) => {
   const sale = receipt.sale;
   const header = receipt.header as Record<string, string | undefined>;
@@ -50,8 +42,15 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
     receipt.hardware_settings ??
     {}) as Record<string, unknown>;
   const logoUrl = useReceiptLogoUri(settings, receipt);
-  const loadedCustomization = useReceiptPrintCustomization(settings);
-  const customization = customizationOverride ?? loadedCustomization;
+  const {
+    bodyText,
+    bodyTextSizeOnly,
+    companyNameStyle,
+    companyDetailsStyle,
+    dividerOverride,
+    logoWidth,
+    logoHeight,
+  } = useReceiptStyleScale(settings, customizationOverride);
 
   const currency = resolveCurrencyCode(settings?.company?.currency);
   const companyName =
@@ -71,49 +70,6 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
     logoUrl && hardware.allow_logo_on_sales_receipt !== false,
   );
 
-  // Every body-text line's font size scales proportionally around this baseline
-  // (instead of every line getting its own independent control), so the receipt's
-  // existing size hierarchy — totals bigger than footnotes — is preserved rather
-  // than flattened. 'regular' weight means "leave each line's own designed weight
-  // alone", so at the defaults this renders pixel-identical to the original
-  // hardcoded styles below.
-  const bodyScale =
-    customization.receiptBodyTextSizePx /
-    DEFAULT_RECEIPT_PRINT_CUSTOMIZATION.receiptBodyTextSizePx;
-  const bodyWeightOverride =
-    customization.receiptBodyTextWeight === 'regular'
-      ? undefined
-      : WEIGHT_MAP[customization.receiptBodyTextWeight];
-  const scaleFont = (base: number) => Math.max(8, Math.round(base * bodyScale));
-  /** Scales font size and, unless the weight is left at 'regular', overrides the
-   * line's weight too. Used for ordinary body text. */
-  const bodyText = (base: number): TextStyle => ({
-    fontSize: scaleFont(base),
-    ...(bodyWeightOverride ? { fontWeight: bodyWeightOverride } : null),
-  });
-  /** Scales font size only — used for the grand total, which always stays at its
-   * own extra-bold weight regardless of the body text weight setting, so the key
-   * number on the receipt never loses emphasis. */
-  const bodyTextSizeOnly = (base: number): TextStyle => ({ fontSize: scaleFont(base) });
-
-  const logoWidth = customization.receiptLogoWidthPx;
-  const logoHeight = Math.round(logoWidth * LOGO_ASPECT_RATIO);
-  const companyNameStyle: TextStyle = {
-    fontSize: customization.receiptCompanyNameSizePx,
-    fontWeight: WEIGHT_MAP[customization.receiptCompanyNameWeight],
-  };
-  // Company details block (address/phone/email/tax ID/reg no) has its own
-  // dedicated size+weight, separate from the general body text control below.
-  const companyDetailsStyle: TextStyle = {
-    fontSize: customization.receiptCompanyDetailsSizePx,
-    ...(customization.receiptCompanyDetailsWeight === 'regular'
-      ? null
-      : { fontWeight: WEIGHT_MAP[customization.receiptCompanyDetailsWeight] }),
-  };
-  // Both divider styles below are overridden to this thickness and rendered fully
-  // solid black — see receiptDividerThicknessPx doc comment.
-  const dividerOverride = { height: customization.receiptDividerThicknessPx };
-
   const now = new Date();
   const printedAt = `${now.toLocaleDateString()} ${now.toLocaleTimeString([], {
     hour: '2-digit',
@@ -121,10 +77,37 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
   })}`;
 
   const isHold = Boolean(sale.is_hold || sale.order_status === 'hold');
+  const isRefundDue = Boolean(sale.is_exchange) && sale.net_amount < 0;
   const invoiceTitle = getSaleReceiptTitle({
     isHold,
     isReturn: Boolean(sale.is_return),
   });
+  const saleLines = sale.lines.filter(line => line.line_direction !== 'return');
+  const returnLines = sale.lines.filter(line => line.line_direction === 'return');
+  const hasReturnLines = returnLines.length > 0;
+  const renderLine = (line: (typeof sale.lines)[number], idx: number) => {
+    const uom = resolveLineUom(line.uom);
+    const isReturnLine = line.line_direction === 'return';
+    return (
+      <View key={`${line.item_number}-${idx}`} style={styles.lineRow}>
+        <VStack style={styles.colItem} flex={1}>
+          <Text style={[styles.lineDesc, bodyText(13)]}>{line.description}</Text>
+          <Text style={[styles.lineSub, bodyText(11)]}>
+            {formatReceiptQtyDetail(
+              line.qty,
+              formatCurrency(line.unit_price, currency),
+              uom,
+            )}
+          </Text>
+        </VStack>
+        <Text style={[styles.lineQty, styles.colQty, bodyText(11)]}>{`${line.qty} ${uom}`}</Text>
+        <Text style={[styles.lineAmt, styles.colAmt, bodyText(13)]}>
+          {isReturnLine ? '-' : ''}
+          {formatCurrency(line.line_total, currency)}
+        </Text>
+      </View>
+    );
+  };
 
   const discountLabel = (() => {
     const base = sale.discount_label ?? 'Discount';
@@ -133,16 +116,18 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
     }
     return base;
   })();
+  // Refund-due exchanges store a signed (negative) net_amount — show the positive
+  // magnitude everywhere on the receipt, matching how it's collected at checkout.
+  const displayNetAmount = isRefundDue ? Math.abs(sale.net_amount) : sale.net_amount;
   const change =
     !isHold && sale.amount_received != null
-      ? sale.amount_received - sale.net_amount
+      ? sale.amount_received - displayNetAmount
       : null;
   const customerInfoRows = [
     { label: 'Customer', value: sale.customer_name },
     { label: 'Customer ID', value: sale.customer_code },
     { label: 'Phone', value: sale.customer_contact_no },
     { label: 'Email', value: sale.customer_email },
-    { label: 'Location', value: sale.customer_location },
     { label: 'Route', value: sale.customer_route },
     { label: 'Address', value: sale.customer_address },
     { label: 'Tax ID', value: sale.customer_tax_id },
@@ -180,7 +165,11 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
         style={[
           styles.invoiceTitle,
           bodyText(14),
-          sale.is_return ? { color: colors.error } : isHold ? { color: colors.warning } : undefined,
+          sale.is_return
+            ? { color: colors.error }
+            : isHold
+              ? { color: colors.warning }
+              : undefined,
         ]}>
         {invoiceTitle}
       </Text>
@@ -190,7 +179,13 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
         </Text>
       ) : null}
       <Text style={[styles.mutedCenter, bodyText(12)]}>
-        {sale.is_return ? 'Return No' : isHold ? 'Hold No' : 'Bill No'}: {sale.sales_id}
+        {sale.is_return
+          ? 'Return No'
+          : sale.is_exchange
+            ? 'Exchange No'
+            : isHold
+              ? 'Hold No'
+              : 'Bill No'}: {sale.sales_id}
       </Text>
       <Text style={[styles.mutedCenter, bodyText(12)]}>
         All amounts in {getCurrencyLabel(currency)}
@@ -225,35 +220,39 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
         </>
       ) : null}
 
-      <View style={styles.tableHead}>
-        <Text style={[styles.th, styles.colItem, bodyText(11)]}>Item</Text>
-        <Text style={[styles.th, styles.colQty, bodyText(11)]}>Qty</Text>
-        <Text style={[styles.th, styles.colAmt, bodyText(11)]}>Amount</Text>
-      </View>
-      <View style={[styles.dividerThin, dividerOverride]} />
+      {hasReturnLines ? (
+        <>
+          <Text style={[styles.sectionLabel, bodyText(11)]}>SOLD ITEMS</Text>
+          <View style={styles.tableHead}>
+            <Text style={[styles.th, styles.colItem, bodyText(11)]}>Item</Text>
+            <Text style={[styles.th, styles.colQty, bodyText(11)]}>Qty</Text>
+            <Text style={[styles.th, styles.colAmt, bodyText(11)]}>Amount</Text>
+          </View>
+          <View style={[styles.dividerThin, dividerOverride]} />
+          {saleLines.map((line, idx) => renderLine(line, idx))}
 
-      {sale.lines.map((line, idx) => {
-        const uom = resolveLineUom(line.uom);
-        return (
-        <View key={`${line.item_number}-${idx}`} style={styles.lineRow}>
-          <VStack style={styles.colItem} flex={1}>
-            <Text style={[styles.lineDesc, bodyText(13)]}>{line.description}</Text>
-            <Text style={[styles.lineSub, bodyText(11)]}>
-              {line.item_number ? `ID ${line.item_number} · ` : ''}
-              {formatReceiptQtyDetail(
-                line.qty,
-                formatCurrency(line.unit_price, currency),
-                uom,
-              )}
-            </Text>
-          </VStack>
-          <Text style={[styles.lineQty, styles.colQty, bodyText(11)]}>{`${line.qty} ${uom}`}</Text>
-          <Text style={[styles.lineAmt, styles.colAmt, bodyText(13)]}>
-            {formatCurrency(line.line_total, currency)}
+          <Text style={[styles.sectionLabel, styles.sectionLabelReturn, bodyText(11)]}>
+            RETURNED ITEMS
           </Text>
-        </View>
-        );
-      })}
+          <View style={styles.tableHead}>
+            <Text style={[styles.th, styles.colItem, bodyText(11)]}>Item</Text>
+            <Text style={[styles.th, styles.colQty, bodyText(11)]}>Qty</Text>
+            <Text style={[styles.th, styles.colAmt, bodyText(11)]}>Amount</Text>
+          </View>
+          <View style={[styles.dividerThin, dividerOverride]} />
+          {returnLines.map((line, idx) => renderLine(line, idx))}
+        </>
+      ) : (
+        <>
+          <View style={styles.tableHead}>
+            <Text style={[styles.th, styles.colItem, bodyText(11)]}>Item</Text>
+            <Text style={[styles.th, styles.colQty, bodyText(11)]}>Qty</Text>
+            <Text style={[styles.th, styles.colAmt, bodyText(11)]}>Amount</Text>
+          </View>
+          <View style={[styles.dividerThin, dividerOverride]} />
+          {sale.lines.map((line, idx) => renderLine(line, idx))}
+        </>
+      )}
 
       <View style={[styles.divider, dividerOverride]} />
 
@@ -262,6 +261,13 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
         value={formatCurrency(sale.sub_total, currency)}
         textStyle={bodyText(13)}
       />
+      {(sale.return_sub_total ?? 0) > 0 ? (
+        <TotalRow
+          label="Return credit"
+          value={`-${formatCurrency(sale.return_sub_total ?? 0, currency)}`}
+          textStyle={bodyText(13)}
+        />
+      ) : null}
       {sale.discount > 0 ? (
         <TotalRow
           label={discountLabel}
@@ -278,10 +284,16 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
       ) : null}
       <View style={styles.grandRow}>
         <Text style={[styles.grandLabel, bodyTextSizeOnly(16)]}>
-          {isHold ? 'AMOUNT DUE' : sale.discount > 0 ? 'BALANCE' : 'TOTAL'}
+          {isHold
+            ? 'AMOUNT DUE'
+            : isRefundDue
+              ? 'REFUND DUE'
+              : sale.discount > 0
+                ? 'BALANCE'
+                : 'TOTAL'}
         </Text>
         <Text style={[styles.grandValue, bodyTextSizeOnly(16)]}>
-          {formatCurrency(sale.net_amount, currency)}
+          {formatCurrency(displayNetAmount, currency)}
         </Text>
       </View>
       {!isHold && sale.amount_received != null ? (
@@ -299,6 +311,13 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
             />
           ) : null}
         </>
+      ) : null}
+      {customerOutstandingBalance != null ? (
+        <TotalRow
+          label="Outstanding balance"
+          value={formatCurrency(customerOutstandingBalance, currency)}
+          textStyle={bodyText(13)}
+        />
       ) : null}
 
       <View style={[styles.divider, dividerOverride]} />
@@ -415,6 +434,17 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 8,
   },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.text,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginTop: 8,
+  },
+  sectionLabelReturn: {
+    marginTop: 12,
+  },
   tableHead: {
     flexDirection: 'row',
     marginTop: 4,
@@ -427,7 +457,7 @@ const styles = StyleSheet.create({
   },
   colItem: { flex: 1 },
   colQty: { width: 52, textAlign: 'right' },
-  colAmt: { width: 80, textAlign: 'right' },
+  colAmt: { width: 110, textAlign: 'right' },
   lineRow: {
     flexDirection: 'row',
     paddingVertical: 8,

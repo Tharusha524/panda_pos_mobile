@@ -15,6 +15,7 @@ import { formatPrintAmount, resolveCurrencyCode } from '@/utils/format';
 import { formatReceiptQtyDetail, resolveLineUom } from '@/utils/uom';
 import type { SaleReceiptPayload } from '@/types/sales';
 import type { PurchaseReceiptPayload } from '@/types/inventory';
+import type { PaymentReceiptPayload } from '@/types/customers';
 
 export type ReceiptCaptureRef = RefObject<ViewShotRef | null>;
 
@@ -187,11 +188,14 @@ async function saveUriToGallery(uri: string, salesId: string): Promise<string> {
   }
 }
 
-type ShareableReceipt = SaleReceiptPayload | PurchaseReceiptPayload;
+type ShareableReceipt = SaleReceiptPayload | PurchaseReceiptPayload | PaymentReceiptPayload;
 
 function getReceiptReference(receipt: ShareableReceipt): string {
   if ('purchase' in receipt) {
     return receipt.purchase.invoice_id;
+  }
+  if ('result' in receipt) {
+    return `Payment-${receipt.result.customer.customer_name}`;
   }
   return receipt.sale.sales_id;
 }
@@ -272,22 +276,46 @@ export function buildReceiptShareText(
   const company = header.company_name ?? 'Receipt';
   const code = resolveCurrencyCode(currency);
   const isHold = Boolean(s.is_hold || s.order_status === 'hold');
+  const isExchange = Boolean(s.is_exchange);
+  const isRefundDue = isExchange && s.net_amount < 0;
+  const displayNetAmount = isRefundDue ? Math.abs(s.net_amount) : s.net_amount;
   const discountLine =
     s.discount > 0
       ? `Discount${s.discount_percent != null && s.discount_percent > 0 ? ` (${s.discount_percent}%)` : ''}: -${formatPrintAmount(s.discount, code)}`
       : '';
-  const lines = s.lines
-    .map(l => {
-      const uom = resolveLineUom(l.uom);
-      return `  ${l.item_number ? `[${l.item_number}] ` : ''}${l.description} ${formatReceiptQtyDetail(l.qty, formatPrintAmount(l.unit_price, code), uom)} = ${formatPrintAmount(l.line_total, code)}`;
-    })
-    .join('\n');
+  const returnCreditLine =
+    (s.return_sub_total ?? 0) > 0
+      ? `Return credit: -${formatPrintAmount(s.return_sub_total ?? 0, code)}`
+      : '';
+  const formatLine = (l: (typeof s.lines)[number]): string => {
+    const uom = resolveLineUom(l.uom);
+    const amount =
+      l.line_direction === 'return'
+        ? `-${formatPrintAmount(l.line_total, code)}`
+        : formatPrintAmount(l.line_total, code);
+    return `  ${l.item_number ? `[${l.item_number}] ` : ''}${l.description} ${formatReceiptQtyDetail(l.qty, formatPrintAmount(l.unit_price, code), uom)} = ${amount}`;
+  };
+
+  // Sold and returned items print as two clearly separate, plainly-labeled
+  // blocks rather than one mixed list with a color tag — this is shared text
+  // (no color available anyway), so separation is what keeps it readable.
+  const returnLines = s.lines.filter(l => l.line_direction === 'return');
+  const saleLines = s.lines.filter(l => l.line_direction !== 'return');
+  const lines =
+    returnLines.length > 0
+      ? [
+          'SOLD ITEMS',
+          saleLines.map(formatLine).join('\n'),
+          'RETURNED ITEMS',
+          returnLines.map(formatLine).join('\n'),
+        ].join('\n')
+      : s.lines.map(formatLine).join('\n');
 
   return [
     company,
     getSaleReceiptTitle({ isHold, isReturn: Boolean(s.is_return) }),
     isHold ? 'NOT PAID — Complete to finalize' : '',
-    `${isHold ? 'Hold' : s.is_return ? 'Return' : 'Bill'}: ${s.sales_id}`,
+    `${isHold ? 'Hold' : isExchange ? 'Exchange' : s.is_return ? 'Return' : 'Bill'}: ${s.sales_id}`,
     `Date: ${s.sale_date}`,
     s.location ? `Branch: ${s.location}` : '',
     s.customer_name ? `Customer: ${s.customer_name}` : '',
@@ -296,8 +324,9 @@ export function buildReceiptShareText(
     lines,
     '---',
     `Subtotal: ${formatPrintAmount(s.sub_total, code)}`,
+    returnCreditLine,
     discountLine,
-    `${isHold ? 'Amount due' : s.discount > 0 ? 'Balance' : 'TOTAL'}: ${formatPrintAmount(s.net_amount, code)}`,
+    `${isHold ? 'Amount due' : isRefundDue ? 'Refund due' : s.discount > 0 ? 'Balance' : 'TOTAL'}: ${formatPrintAmount(displayNetAmount, code)}`,
     !isHold && s.amount_received != null
       ? `Paid: ${formatPrintAmount(s.amount_received, code)}`
       : '',

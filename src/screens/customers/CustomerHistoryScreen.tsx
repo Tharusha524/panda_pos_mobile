@@ -87,7 +87,10 @@ export const CustomerHistoryScreen: React.FC = () => {
       setReceiptLoading(true);
       try {
         const receipt = await salesService.getReceipt(sale.id);
-        navigation.navigate('CustomerSaleReceipt', { receipt });
+        navigation.navigate('CustomerSaleReceipt', {
+          receipt,
+          customerId: params.customerId,
+        });
       } catch (e) {
         showError({
           title: 'Receipt unavailable',

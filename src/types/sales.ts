@@ -6,8 +6,10 @@ export const TRANSACTION_TYPE_SALE = '1001';
 export const TRANSACTION_TYPE_RETURN = '1002';
 /** Quotation — no stock/payment until completed */
 export const TRANSACTION_TYPE_QUOTATION = '1003';
+/** Exchange — sale + return in one bill, deducts stock for sold lines and restores it for returned lines */
+export const TRANSACTION_TYPE_EXCHANGE = '1004';
 
-export type SaleTransactionMode = 'sale' | 'return';
+export type SaleTransactionMode = 'sale' | 'return' | 'exchange';
 
 export interface PosFilters {
   transaction_types: string[];
@@ -103,6 +105,8 @@ export interface CartLine {
   batch_expiry_date?: string | null;
   /** Branch inventory row used for stock deduction */
   inventory_location?: string | null;
+  /** Exchange mode only — tags whether this line is a new sale item or a returned item. Absent/'sale' in normal Sale/Return modes. */
+  line_direction?: 'sale' | 'return';
 }
 
 export interface SaleLineItem extends CartLine {
@@ -135,6 +139,7 @@ export interface ReceiptLine {
   unit_price: number;
   line_total: number;
   uom?: string | null;
+  line_direction?: 'sale' | 'return';
 }
 
 export interface SaleReceiptPayload {
@@ -142,6 +147,7 @@ export interface SaleReceiptPayload {
     sales_id: string;
     transaction_type?: string;
     is_return?: boolean;
+    is_exchange?: boolean;
     order_status?: string;
     is_hold?: boolean;
     discount_type?: 'percent' | 'amount';
@@ -158,6 +164,7 @@ export interface SaleReceiptPayload {
     customer_address?: string | null;
     customer_tax_id?: string | null;
     sub_total: number;
+    return_sub_total?: number;
     discount: number;
     service_charge?: number;
     net_amount: number;
@@ -188,6 +195,8 @@ export interface CreateSalePayload {
   customer_id?: number | null;
   customer_name?: string | null;
   sub_total: number;
+  /** Exchange only — total value of returned lines, informational (net_amount is already signed). */
+  return_sub_total?: number;
   discount: number;
   service_charge?: number;
   net_amount: number;

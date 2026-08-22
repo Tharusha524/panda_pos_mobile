@@ -12,18 +12,33 @@ import { PrimaryButton } from '@/components/buttons/PrimaryButton';
 import { LoadingOverlay } from '@/components/common/LoadingOverlay';
 import { BackendReportView } from '@/components/reports/BackendReportView';
 import { SystemReportView } from '@/components/reports/SystemReportView';
+import { ReportDatePickerField } from '@/components/inputs/ReportDatePickerField';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { ReportFilterBar } from '@/components/reports/ReportFilterBar';
 import { useSystemReport } from '@/hooks/useSystemReport';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
+import { reportService } from '@/services/api/reportService';
 import { navigateToPrinterSetup } from '@/navigation/navigationRef';
 import { getReportMeta } from '@/types/reports';
 import type { ReportsStackParamList } from '@/navigation/types';
-import { colors } from '@/theme';
-import { defaultReportFilters, formatReportDateRangeLabel } from '@/utils/reportDateFilters';
+import type { BackendReportData } from '@/types/backendReports';
+import { colors, shadows } from '@/theme';
+import {
+  defaultReportFilters,
+  formatDateYmd,
+  formatReportDateLabel,
+  formatReportDateRangeLabel,
+} from '@/utils/reportDateFilters';
 import type { ReportFilterParams } from '@/types/reportFilters';
-import { buildPrintHeaderFromSettings as buildHeader } from '@/utils/receiptPrintCustomization';
+import { captureReceiptBase64 } from '@/utils/receiptImageShare';
+import { supportsDateFilter, supportsItemFilter } from '@/constants/reportFilterCapabilities';
+import { downloadDailySalesExcel, shareDailySalesExcel } from '@/utils/dailySalesFile';
+import { downloadReportTableExcel, shareReportTableExcel } from '@/utils/reportTableFile';
+import {
+  buildPrintHeaderFromSettings as buildHeader,
+  getReceiptPrintCustomization,
+} from '@/utils/receiptPrintCustomization';
 
 type Route = RouteProp<ReportsStackParamList, 'ReportView'>;
 
@@ -46,6 +61,126 @@ export const ReportViewScreen: React.FC = () => {
 
   const meta = getReportMeta(params.type);
   const header = useMemo(() => buildHeader(settings), [settings]);
+
+  // Daily Business Summary is otherwise fixed to "today" (see useSystemReport —
+  // the dashboard API it uses takes no date param). This lets that one report
+  // type pick any past day and see/export that day's sales, without touching
+  // the existing today-only dashboard flow above.
+  const isDailySummary = params.type === 'daily_summary';
+  // Sales report already has its own date-range picker (ReportFilterBar
+  // below) — it reuses the same Excel pivot as Daily Business Summary, just
+  // fed that range's sales instead of a single day's, no extra UI needed.
+  const isSalesReport = params.type === 'sales_report';
+  const pivotExcelSupported = isDailySummary || isSalesReport;
+  // Return report and Customer Settlement are already a flat column/row
+  // table (see reportPayload on the backend) — exported as-is via the
+  // generic table exporter instead of the item-level sales pivot above.
+  const isReturnReport = params.type === 'return_report';
+  const isCustomerSettlement = params.type === 'customer_settlement';
+  const genericExcelSupported = isReturnReport || isCustomerSettlement;
+  const excelExportSupported = pivotExcelSupported || genericExcelSupported;
+  const today = useMemo(() => formatDateYmd(new Date()), []);
+  const [salesReportDate, setSalesReportDate] = useState(today);
+  const isPastDateSelected = isDailySummary && salesReportDate !== today;
+  const [dailySalesReport, setDailySalesReport] = useState<BackendReportData | null>(null);
+  const [dailySalesLoading, setDailySalesLoading] = useState(false);
+  const [dailySalesError, setDailySalesError] = useState<string | null>(null);
+  const [exportingExcel, setExportingExcel] = useState<'download' | 'share' | null>(null);
+
+  // Sales report / Return report / Customer Settlement all use the normal
+  // filter bar's date range; only Daily Business Summary has its own
+  // single-day picker (salesReportDate above).
+  const usesFilterDateRange = isSalesReport || genericExcelSupported;
+  const excelDateFrom = usesFilterDateRange ? filters.dateFrom : salesReportDate;
+  const excelDateTo = usesFilterDateRange ? filters.dateTo : salesReportDate;
+
+  useEffect(() => {
+    if (!pivotExcelSupported) {
+      return;
+    }
+    let cancelled = false;
+    setDailySalesLoading(true);
+    setDailySalesError(null);
+    reportService
+      .fetch('sales-summary', { dateFrom: excelDateFrom, dateTo: excelDateTo })
+      .then(report => {
+        if (!cancelled) {
+          setDailySalesReport(report);
+        }
+      })
+      .catch(e => {
+        if (!cancelled) {
+          setDailySalesError(e instanceof Error ? e.message : 'Failed to load sales for this period');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setDailySalesLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pivotExcelSupported, excelDateFrom, excelDateTo]);
+
+  const handleExportExcel = async (action: 'download' | 'share') => {
+    const dateKey = usesFilterDateRange
+      ? `${excelDateFrom}_to_${excelDateTo}`
+      : excelDateFrom;
+    const dateLabel = usesFilterDateRange
+      ? formatReportDateRangeLabel(excelDateFrom, excelDateTo)
+      : formatReportDateLabel(excelDateFrom);
+
+    setExportingExcel(action);
+    try {
+      if (genericExcelSupported) {
+        if (!result || result.source !== 'backend') {
+          showError({
+            title: 'Excel export',
+            message: 'This report is still loading — try again in a moment.',
+            variant: 'warning',
+          });
+          return;
+        }
+        if (action === 'download') {
+          const message = await downloadReportTableExcel(result.report, dateKey, dateLabel);
+          showError({ title: 'Excel saved', message, variant: 'info', confirmLabel: 'OK' });
+        } else {
+          await shareReportTableExcel(result.report, dateKey, dateLabel);
+        }
+        return;
+      }
+
+      if (!dailySalesReport) {
+        showError({
+          title: 'Excel export',
+          message: 'Sales for this period are still loading — try again in a moment.',
+          variant: 'warning',
+        });
+        return;
+      }
+      const title = isSalesReport ? 'Sales Report' : 'Daily Sale Report';
+      if (action === 'download') {
+        const message = await downloadDailySalesExcel(
+          dailySalesReport.sales ?? [],
+          dateKey,
+          dateLabel,
+          title,
+        );
+        showError({ title: 'Excel saved', message, variant: 'info', confirmLabel: 'OK' });
+      } else {
+        await shareDailySalesExcel(dailySalesReport.sales ?? [], dateKey, dateLabel, title);
+      }
+    } catch (e) {
+      showError({
+        title: action === 'download' ? 'Download failed' : 'Share failed',
+        message: e instanceof Error ? e.message : 'Could not export the Excel report',
+        variant: 'warning',
+      });
+    } finally {
+      setExportingExcel(null);
+    }
+  };
 
   useEffect(() => {
     if (error && error !== lastError.current) {
@@ -76,14 +211,31 @@ export const ReportViewScreen: React.FC = () => {
     }
     setPrinting(true);
     try {
+      let capturedImageBase64: string | undefined;
+      try {
+        const customization = await getReceiptPrintCustomization(settings);
+        if (customization.printAsImage) {
+          capturedImageBase64 = await captureReceiptBase64(reportShotRef);
+        }
+      } catch {
+        // Couldn't read the setting or capture the preview — fall back to the
+        // normal text report below instead of blocking the print entirely.
+      }
       if (result.source === 'dashboard') {
-        await bluetoothPrintService.printReport(result.report, currency, settings);
+        await bluetoothPrintService.printReport(
+          result.report,
+          currency,
+          settings,
+          capturedImageBase64,
+        );
       } else {
         await bluetoothPrintService.printBackendReport(
           result.report,
           header,
           currency,
           settings,
+          capturedImageBase64,
+          params.type,
         );
       }
     } catch (e) {
@@ -101,6 +253,9 @@ export const ReportViewScreen: React.FC = () => {
   };
 
   const subtitle = useMemo(() => {
+    if (isPastDateSelected) {
+      return formatReportDateLabel(salesReportDate);
+    }
     if (result?.source === 'dashboard') {
       return result.report.subtitle ?? formatReportDateRangeLabel(filters.dateFrom, filters.dateTo);
     }
@@ -113,7 +268,15 @@ export const ReportViewScreen: React.FC = () => {
       return `${result.report.filters.date_from} — ${result.report.filters.date_to}${itemSuffix}`;
     }
     return meta?.subtitle;
-  }, [filters.dateFrom, filters.dateTo, filters.itemLabel, meta?.subtitle, result]);
+  }, [
+    filters.dateFrom,
+    filters.dateTo,
+    filters.itemLabel,
+    isPastDateSelected,
+    meta?.subtitle,
+    result,
+    salesReportDate,
+  ]);
 
   const scrollBottomPad = Math.max(insets.bottom, 16) + 88;
 
@@ -136,9 +299,73 @@ export const ReportViewScreen: React.FC = () => {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} />
         }>
-        <ReportFilterBar filters={filters} onChange={setFilters} />
+        <ReportFilterBar
+          filters={filters}
+          onChange={setFilters}
+          showDateFilter={supportsDateFilter(params.type)}
+          showItemFilter={supportsItemFilter(params.type)}
+        />
 
-        {result ? (
+        {isDailySummary ? (
+          <Box
+            w="100%"
+            maxWidth={400}
+            bg={colors.white}
+            borderRadius="$xl"
+            borderWidth={1}
+            borderColor={colors.border}
+            p="$4"
+            mb="$4"
+            style={shadows.sm}>
+            <ReportDatePickerField
+              label="Report day"
+              value={salesReportDate}
+              onChange={setSalesReportDate}
+            />
+          </Box>
+        ) : null}
+
+        {isPastDateSelected ? (
+          <>
+            {dailySalesLoading && !dailySalesReport ? (
+              <LoadingOverlay message="Loading day's sales…" />
+            ) : null}
+            {dailySalesReport ? (
+              <View style={{ width: '100%', maxWidth: 400 }} collapsable={false}>
+                <BackendReportView
+                  report={dailySalesReport}
+                  header={header}
+                  settings={settings}
+                  reportType={params.type}
+                />
+              </View>
+            ) : !dailySalesLoading && dailySalesError ? (
+              <Box w="100%" maxWidth={400} px="$4" py="$8">
+                <VStack alignItems="center" space="md">
+                  <Text fontSize="$sm" color={colors.textSecondary} textAlign="center">
+                    {dailySalesError}
+                  </Text>
+                </VStack>
+              </Box>
+            ) : null}
+            <Box w="100%" maxWidth={400} gap="$2" mt="$4" mb="$2">
+              <PrimaryButton
+                label={exportingExcel === 'download' ? 'Saving…' : 'Download Excel'}
+                variant="outline"
+                onPress={() => handleExportExcel('download')}
+                loading={exportingExcel === 'download'}
+                disabled={exportingExcel != null}
+              />
+              <PrimaryButton
+                label={exportingExcel === 'share' ? 'Sharing…' : 'Share Excel'}
+                variant="outline"
+                onPress={() => handleExportExcel('share')}
+                loading={exportingExcel === 'share'}
+                disabled={exportingExcel != null}
+              />
+            </Box>
+          </>
+        ) : result ? (
           <>
             <View style={{ width: '100%', maxWidth: 400 }} collapsable={false}>
               <ViewShot
@@ -152,6 +379,7 @@ export const ReportViewScreen: React.FC = () => {
                     report={result.report}
                     header={header}
                     settings={settings}
+                    reportType={params.type}
                   />
                 )}
               </ViewShot>
@@ -163,6 +391,24 @@ export const ReportViewScreen: React.FC = () => {
                 loading={printing}
                 disabled={!result}
               />
+              {excelExportSupported ? (
+                <>
+                  <PrimaryButton
+                    label={exportingExcel === 'download' ? 'Saving…' : 'Download Excel'}
+                    variant="outline"
+                    onPress={() => handleExportExcel('download')}
+                    loading={exportingExcel === 'download'}
+                    disabled={exportingExcel != null}
+                  />
+                  <PrimaryButton
+                    label={exportingExcel === 'share' ? 'Sharing…' : 'Share Excel'}
+                    variant="outline"
+                    onPress={() => handleExportExcel('share')}
+                    loading={exportingExcel === 'share'}
+                    disabled={exportingExcel != null}
+                  />
+                </>
+              ) : null}
             </Box>
           </>
         ) : !loading && !error ? (

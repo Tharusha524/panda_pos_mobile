@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Keyboard, Pressable, StyleSheet, View } from 'react-native';
 import { Text } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { PauseCircle } from 'lucide-react-native';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
@@ -10,9 +10,14 @@ import { LoadingOverlay } from '@/components/common/LoadingOverlay';
 import { PosCategoryBar } from '@/components/sales/PosCategoryBar';
 import { SaleModeToggle } from '@/components/sales/SaleModeToggle';
 import { ReturnSalePicker } from '@/components/sales/ReturnSalePicker';
+import {
+  ExchangeAddModeToggle,
+  type ExchangeAddMode,
+} from '@/components/sales/ExchangeAddModeToggle';
 import { PosProductGrid } from '@/components/sales/PosProductGrid';
 import { PosBatchSelectModal } from '@/components/sales/PosBatchSelectModal';
 import { PosDockCartBar } from '@/components/sales/PosDockCartBar';
+import { StartSaleGateModal } from '@/components/sales/StartSaleGateModal';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSaleContext } from '@/context/PosSaleContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
@@ -27,11 +32,14 @@ type Nav = NativeStackNavigationProp<SalesStackParamList, 'SalesPOS'>;
 
 export const SalesScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
+  const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const { showError } = useErrorDialog();
   const { currency } = usePosSettings();
   const pos = usePosSaleContext();
   const { error: posError, setError: setPosError } = pos;
+  const [exchangeAddMode, setExchangeAddMode] = useState<ExchangeAddMode>('sale');
+  const isExchangeReturnMode = pos.isExchange && exchangeAddMode === 'return';
 
   useEffect(() => {
     if (posError) {
@@ -45,6 +53,22 @@ export const SalesScreen: React.FC = () => {
     [pos.cart],
   );
 
+  const exchangeSaleCount = useMemo(
+    () =>
+      pos.cart
+        .filter(l => l.line_direction !== 'return')
+        .reduce((n, l) => n + l.qty, 0),
+    [pos.cart],
+  );
+
+  const exchangeReturnCount = useMemo(
+    () =>
+      pos.cart
+        .filter(l => l.line_direction === 'return')
+        .reduce((n, l) => n + l.qty, 0),
+    [pos.cart],
+  );
+
   const cartQtySummary = useMemo(
     () => summarizeCartQtyByUom(pos.cart),
     [pos.cart],
@@ -52,6 +76,18 @@ export const SalesScreen: React.FC = () => {
 
   const canBrowseItems =
     !pos.isReturn || pos.returnSourceSale != null || pos.returnWithoutBill;
+
+  // Force route + customer selection before a brand-new sale can be started.
+  // Gated on isFocused too — the Sales tab mounts in the background as soon as
+  // the app starts (it's the tab navigator's initial route and tabs stay
+  // mounted when you switch away), so without this the popup could fire
+  // silently before the user ever taps "New Sale".
+  const showStartSaleGate =
+    isFocused &&
+    !pos.isReturn &&
+    !pos.loading &&
+    pos.cart.length === 0 &&
+    !pos.routeLocked;
 
   const openOrder = () => {
     if (
@@ -92,7 +128,9 @@ export const SalesScreen: React.FC = () => {
   );
 
   const handleAddItem = (item: InventoryItem) => {
-    const added = pos.tryAddToCart(item, 1);
+    const added = isExchangeReturnMode
+      ? pos.tryAddReturnLineToCart(item, 1)
+      : pos.tryAddToCart(item, 1);
     if (added) {
       openOrder();
     }
@@ -120,7 +158,7 @@ export const SalesScreen: React.FC = () => {
         <View style={styles.metaRow}>
           <View style={styles.metaTextCol}>
             <Text style={styles.metaTitle}>
-              {pos.isReturn ? 'Return' : 'Menu'}
+              {pos.isReturn ? 'Return' : pos.isExchange ? 'Exchange' : 'Menu'}
             </Text>
             {!pos.isReturn ? (
               <Text style={styles.metaSub} numberOfLines={1}>
@@ -163,6 +201,14 @@ export const SalesScreen: React.FC = () => {
           />
         ) : null}
         {pos.isReturn ? <ReturnSalePicker /> : null}
+        {pos.isExchange ? (
+          <ExchangeAddModeToggle
+            mode={exchangeAddMode}
+            onChange={setExchangeAddMode}
+            saleCount={exchangeSaleCount}
+            returnCount={exchangeReturnCount}
+          />
+        ) : null}
       </View>
 
       <View style={styles.flex}>
@@ -179,26 +225,36 @@ export const SalesScreen: React.FC = () => {
               onRefresh={pos.isReturn ? () => {} : pos.refreshProducts}
               onAddItem={handleAddItem}
               onOpenOrder={() => openOrder()}
-              onIncrementItem={item => pos.tryAddToCart(item, 1)}
+              onIncrementItem={item =>
+                isExchangeReturnMode
+                  ? pos.tryAddReturnLineToCart(item, 1)
+                  : pos.tryAddToCart(item, 1)
+              }
               onRemoveItem={item =>
-                pos.decrementDisplayCartQty(item, item.sale_line_batch_id ?? null)
+                isExchangeReturnMode
+                  ? pos.decrementReturnLineInCart(item.id, item.sale_line_batch_id ?? null)
+                  : pos.decrementDisplayCartQty(item, item.sale_line_batch_id ?? null)
               }
               onRemoveAll={item =>
-                pos.removeDisplayFromCart(item, item.sale_line_batch_id ?? null)
+                isExchangeReturnMode
+                  ? pos.removeFromCart(item.id, item.sale_line_batch_id ?? null, 'return')
+                  : pos.removeDisplayFromCart(item, item.sale_line_batch_id ?? null)
               }
               onOpenBatches={
-                pos.isReturn ? undefined : handleOpenBatchTable
+                pos.isReturn || isExchangeReturnMode ? undefined : handleOpenBatchTable
               }
               batchItemIds={pos.batchItemIds}
               getCartQty={item =>
-                item.return_line_key != null
-                  ? pos.getCartLineQty(item.id, item.sale_line_batch_id ?? null)
+                isExchangeReturnMode
+                  ? pos.getReturnCartQty(item.id, item.sale_line_batch_id ?? null)
                   : pos.getDisplayCartQty(item)
               }
               cartRevision={cartRevision}
-              canSellItem={item => pos.canSellItem(item, 1).ok}
-              ignoreStock={pos.isReturn}
-              offerProductItemIds={pos.isReturn ? undefined : pos.offerProductItemIds}
+              canSellItem={item => (isExchangeReturnMode ? true : pos.canSellItem(item, 1).ok)}
+              ignoreStock={pos.isReturn || isExchangeReturnMode}
+              offerProductItemIds={
+                pos.isReturn || isExchangeReturnMode ? undefined : pos.offerProductItemIds
+              }
               bottomInset={listBottomInset}
             />
           ) : (
@@ -229,6 +285,19 @@ export const SalesScreen: React.FC = () => {
         onClose={pos.closeBatchPicker}
         onSelectMainProduct={pos.addMainFromBatchPicker}
         onSelectBatch={pos.addBatchFromPicker}
+      />
+
+      <StartSaleGateModal
+        visible={showStartSaleGate}
+        routeOptions={pos.routeOptions}
+        route={pos.route}
+        onSelectRoute={pos.selectRoute}
+        customers={pos.customers}
+        customer={pos.customer}
+        onSelectCustomer={pos.selectCustomer}
+        onNewCustomer={() => navigation.navigate('CustomerForm', { selectOnSave: true })}
+        onConfirm={pos.lockRouteSelection}
+        currency={currency}
       />
     </ScreenContainer>
   );

@@ -13,7 +13,7 @@ import type {
   TodayPurchaseRow,
   TodaySaleRow,
 } from '@/types/dashboard';
-import { TRANSACTION_TYPE_RETURN } from '@/types/sales';
+import { TRANSACTION_TYPE_EXCHANGE, TRANSACTION_TYPE_RETURN } from '@/types/sales';
 
 const StatusPill: React.FC<{
   label: string;
@@ -119,6 +119,8 @@ export const TodaySalesList: React.FC<{
     <View style={styles.list}>
       {rows.map(row => {
         const isReturn = row.transaction_type === TRANSACTION_TYPE_RETURN;
+        const isExchange = row.transaction_type === TRANSACTION_TYPE_EXCHANGE;
+        const isRefundDue = isExchange && row.amount < 0;
         const isHold = (row.status ?? '').toLowerCase() === 'hold';
         return (
           <RowCard
@@ -127,20 +129,22 @@ export const TodaySalesList: React.FC<{
             iconBg={colors.primarySoft}
             title={row.sales_id}
             subtitle={row.customer_name?.trim() || 'Walk-in Customer'}
-            amount={formatCurrency(row.amount, currency)}
-            amountColor={isReturn ? colors.error : colors.primary}
+            amount={formatCurrency(Math.abs(row.amount), currency)}
+            amountColor={isReturn || isRefundDue ? colors.error : colors.primary}
             meta={[row.location, row.time].filter(Boolean).join(' · ')}
-            accent={isReturn ? 'return' : 'default'}
+            accent={isReturn || isRefundDue ? 'return' : 'default'}
             pill={
               <StatusPill
                 label={
-                  isReturn
-                    ? 'Return'
-                    : isHold
-                      ? 'Hold'
-                      : row.payment_method?.trim() || 'Paid'
+                  isExchange
+                    ? 'Exchange'
+                    : isReturn
+                      ? 'Return'
+                      : isHold
+                        ? 'Hold'
+                        : row.payment_method?.trim() || 'Paid'
                 }
-                tone={isReturn ? 'return' : isHold ? 'hold' : 'sale'}
+                tone={isReturn || isRefundDue ? 'return' : isHold ? 'hold' : 'sale'}
               />
             }
           />

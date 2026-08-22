@@ -8,7 +8,6 @@ import { buildSystemReport } from '@/utils/systemReportBuilder';
 import type { BackendReportData } from '@/types/backendReports';
 import type { ReportFilterParams } from '@/types/reportFilters';
 import type { SystemReportPayload, SystemReportType } from '@/types/reports';
-import { formatReportDateRangeLabel } from '@/utils/reportDateFilters';
 
 export type ReportLoadResult =
   | { source: 'dashboard'; report: SystemReportPayload }
@@ -36,8 +35,10 @@ export const useSystemReport = (type: SystemReportType, filters: ReportFilterPar
             dashboardService.getOverview(),
             dashboardService.getTodayTables(),
           ]);
+          // buildSystemReport already sets a correct "today" subtitle — this data
+          // is always today's snapshot regardless of the (hidden, for this report
+          // type) date filter, so don't overwrite it with the selected range.
           const report = buildSystemReport(type, overview, today, settings);
-          report.subtitle = formatReportDateRangeLabel(filters.dateFrom, filters.dateTo);
           setResult({
             source: 'dashboard',
             report,

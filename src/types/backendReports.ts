@@ -38,6 +38,8 @@ export interface SalesSummarySale {
   discount: number;
   net_amount: number;
   payment_method: string | null;
+  cheque_number?: string | null;
+  bank_name?: string | null;
   items: SalesSummaryLineItem[];
 }
 

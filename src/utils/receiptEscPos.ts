@@ -72,6 +72,9 @@ export const buildEscPosReceipt = (
   const lines: string[] = [];
 
   const isReturn = Boolean((sale as { is_return?: boolean }).is_return);
+  const isExchange = Boolean((sale as { is_exchange?: boolean }).is_exchange);
+  const isRefundDue = isExchange && sale.net_amount < 0;
+  const displayNetAmount = isRefundDue ? Math.abs(sale.net_amount) : sale.net_amount;
   const isHold =
     (sale as { is_hold?: boolean }).is_hold ||
     (sale as { order_status?: string }).order_status === 'hold';
@@ -102,7 +105,7 @@ export const buildEscPosReceipt = (
 
   // Bill title — "SALES RECEIPT" / "HOLD ORDER" / "SALES RETURN", matching the
   // on-screen receipt preview's bold heading (previously only shown for hold/return).
-  lines.push(escHeaderLine(ctx, getSaleReceiptTitle({ isHold, isReturn })));
+  lines.push(escHeaderLine(ctx, getSaleReceiptTitle({ isHold, isReturn, isExchange })));
   if (isHold) {
     lines.push(escHeaderLine(ctx, 'NOT PAID — Complete to finalize'));
   }
@@ -127,53 +130,101 @@ export const buildEscPosReceipt = (
   lines.push(
     escPadLine(
       ctx,
-      isReturn ? 'Return receipt #' : isHold ? 'Hold receipt #' : 'Sales receipt #',
+      isExchange
+        ? 'Exchange receipt #'
+        : isReturn
+          ? 'Return receipt #'
+          : isHold
+            ? 'Hold receipt #'
+            : 'Sales receipt #',
       sale.sales_id,
     ),
   );
   lines.push(escDivider(ctx));
 
   // Item table — full single-line columns on wide paper, two-line fallback on
-  // narrow 58mm mini paper where 4 columns can't fit legibly.
+  // narrow 58mm mini paper where 4 columns can't fit legibly. Sold and returned
+  // items print as two clearly separate tables (with their own headings) rather
+  // than one mixed list, since thermal printers can't rely on color to tell them
+  // apart.
+  const saleLines = sale.lines.filter(line => line.line_direction !== 'return');
+  const returnLines = sale.lines.filter(line => line.line_direction === 'return');
+  const hasReturnLines = returnLines.length > 0;
   const isWideTable = ctx.lineWidth >= WIDE_TABLE_MIN_WIDTH;
-  if (isWideTable) {
+
+  const printWideRow = (line: (typeof sale.lines)[number]) => {
     const c = ITEM_TABLE_COLUMNS;
+    const isReturnLine = line.line_direction === 'return';
+    const amount = isReturnLine
+      ? `-${formatPlainAmount(line.line_total)}`
+      : formatPlainAmount(line.line_total);
     lines.push(
       escTableRow(ctx, [
-        { text: 'Item Name', width: c.name },
-        { text: 'Qty', width: c.qty, align: 'right' },
-        { text: 'Price', width: c.price, align: 'right' },
-        { text: 'Amount', width: c.amount, align: 'right' },
+        { text: line.description, width: c.name },
+        { text: formatQtyWithUom(line.qty, line.uom), width: c.qty, align: 'right' },
+        { text: formatPlainAmount(line.unit_price), width: c.price, align: 'right' },
+        { text: amount, width: c.amount, align: 'right' },
       ]),
     );
-    lines.push(escDivider(ctx));
-    for (const line of sale.lines) {
+  };
+
+  const printNarrowRow = (line: (typeof sale.lines)[number]) => {
+    const isReturnLine = line.line_direction === 'return';
+    const desc = wrapDesc(ctx, line.description);
+    const uom = resolveLineUom(line.uom);
+    if (line.item_number) {
+      lines.push(escLine(ctx, `ID ${line.item_number}`));
+    }
+    lines.push(escLine(ctx, desc));
+    const detail = formatReceiptQtyDetail(line.qty, formatPlainAmount(line.unit_price), uom);
+    const amount = isReturnLine
+      ? `-${formatPlainAmount(line.line_total)}`
+      : formatPlainAmount(line.line_total);
+    lines.push(escPadLine(ctx, detail, amount));
+  };
+
+  const printTableHead = () => {
+    if (isWideTable) {
+      const c = ITEM_TABLE_COLUMNS;
       lines.push(
         escTableRow(ctx, [
-          { text: line.description, width: c.name },
-          { text: formatQtyWithUom(line.qty, line.uom), width: c.qty, align: 'right' },
-          { text: formatPlainAmount(line.unit_price), width: c.price, align: 'right' },
-          { text: formatPlainAmount(line.line_total), width: c.amount, align: 'right' },
+          { text: 'Item Name', width: c.name },
+          { text: 'Qty', width: c.qty, align: 'right' },
+          { text: 'Price', width: c.price, align: 'right' },
+          { text: 'Amount', width: c.amount, align: 'right' },
         ]),
       );
+      lines.push(escDivider(ctx));
+    } else {
+      lines.push(escPadLine(ctx, 'Item', 'Amount'));
+      lines.push(escLine(ctx, '.'.repeat(ctx.lineWidth), 'left'));
+    }
+  };
+
+  if (hasReturnLines) {
+    lines.push(escHeaderLine(ctx, 'SOLD ITEMS'));
+    printTableHead();
+    for (const line of saleLines) {
+      isWideTable ? printWideRow(line) : printNarrowRow(line);
+    }
+    lines.push(escDivider(ctx));
+    lines.push(escHeaderLine(ctx, 'RETURNED ITEMS'));
+    printTableHead();
+    for (const line of returnLines) {
+      isWideTable ? printWideRow(line) : printNarrowRow(line);
     }
   } else {
-    lines.push(escPadLine(ctx, 'Item', 'Amount'));
-    lines.push(escLine(ctx, '.'.repeat(ctx.lineWidth), 'left'));
+    printTableHead();
     for (const line of sale.lines) {
-      const desc = wrapDesc(ctx, line.description);
-      const uom = resolveLineUom(line.uom);
-      if (line.item_number) {
-        lines.push(escLine(ctx, `ID ${line.item_number}`));
-      }
-      lines.push(escLine(ctx, desc));
-      const detail = formatReceiptQtyDetail(line.qty, formatPlainAmount(line.unit_price), uom);
-      lines.push(escPadLine(ctx, detail, formatPlainAmount(line.line_total)));
+      isWideTable ? printWideRow(line) : printNarrowRow(line);
     }
   }
 
   lines.push(escDivider(ctx));
   lines.push(escPadLine(ctx, 'Subtotal', formatPlainAmount(sale.sub_total)));
+  if ((sale.return_sub_total ?? 0) > 0) {
+    lines.push(escPadLine(ctx, 'Return credit', `-${formatPlainAmount(sale.return_sub_total ?? 0)}`));
+  }
   if (sale.discount > 0) {
     const baseLabel =
       (sale as { discount_label?: string | null }).discount_label?.trim() || 'Discount';
@@ -186,7 +237,13 @@ export const buildEscPosReceipt = (
     lines.push(escPadLine(ctx, 'Service charge', formatPlainAmount(sale.service_charge ?? 0)));
   }
   lines.push(escDivider(ctx));
-  lines.push(escPadLine(ctx, isHold ? 'Amount due' : 'Total', formatPlainAmount(sale.net_amount)));
+  lines.push(
+    escPadLine(
+      ctx,
+      isHold ? 'Amount due' : isRefundDue ? 'Refund due' : 'Total',
+      formatPlainAmount(displayNetAmount),
+    ),
+  );
   lines.push(escDivider(ctx, '='));
 
   // 'left' explicitly — these sit among left-anchored ledger rows (Received/Balance,
@@ -194,7 +251,7 @@ export const buildEscPosReceipt = (
   lines.push(escLine(ctx, `Paid By ${sale.payment_method ?? 'Cash'}`, 'left'));
   if (!isHold && sale.amount_received != null) {
     lines.push(escPadLine(ctx, 'Received', formatPlainAmount(sale.amount_received)));
-    const change = sale.amount_received - sale.net_amount;
+    const change = sale.amount_received - displayNetAmount;
     if (change >= 0) {
       lines.push(escPadLine(ctx, 'Balance', formatPlainAmount(change)));
     }

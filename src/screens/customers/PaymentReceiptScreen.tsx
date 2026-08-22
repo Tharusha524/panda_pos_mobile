@@ -1,14 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { View } from 'react-native';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import ViewShot, { type ViewShotRef } from 'react-native-view-shot';
-import { Box } from '@gluestack-ui/themed';
+import { Box, Text } from '@gluestack-ui/themed';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { AppHeader } from '@/components/common/AppHeader';
 import { PrimaryButton } from '@/components/buttons/PrimaryButton';
-import { SaleReceiptView } from '@/components/sales/SaleReceiptView';
+import { PaymentReceiptView } from '@/components/customers/PaymentReceiptView';
 import { ReceiptActions } from '@/components/sales/ReceiptBottomBar';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
@@ -19,49 +19,44 @@ import {
   downloadReceiptAsImage,
   shareReceiptImageFile,
 } from '@/utils/receiptImageShare';
-import { getReceiptPrintCustomization } from '@/utils/receiptPrintCustomization';
-import { customerService } from '@/services/api/customerService';
-import { TAB_BAR_SCROLL_PADDING } from '@/theme';
+import { getReceiptPrintCustomization, buildPrintHeaderFromSettings } from '@/utils/receiptPrintCustomization';
+import { colors, TAB_BAR_SCROLL_PADDING } from '@/theme';
 import type { HomeStackParamList } from '@/navigation/types';
 
-type Route = RouteProp<HomeStackParamList, 'CustomerSaleReceipt'>;
+type Route = RouteProp<HomeStackParamList, 'PaymentReceipt'>;
 
 const isPrinterSetupError = (msg: string): boolean =>
   /no printer|not configured|settings/i.test(msg);
 
-export const CustomerSaleReceiptScreen: React.FC = () => {
+/** Review + print screen for a "receive payment" receipt — same content the old
+ * text-only receipt printed, now routed through the image-receipt preview/print
+ * flow shared with sale receipts. */
+export const PaymentReceiptScreen: React.FC = () => {
   const navigation = useNavigation();
   const { params } = useRoute<Route>();
-  const { settings, currency } = usePosSettings();
+  const { settings } = usePosSettings();
   const { showError, showConfirm } = useErrorDialog();
   const [printing, setPrinting] = useState(false);
   const [savingImage, setSavingImage] = useState(false);
-  const [customerOutstandingBalance, setCustomerOutstandingBalance] = useState<
-    number | null
-  >(null);
+  const [confirming, setConfirming] = useState(false);
   const receiptShotRef = useRef<ViewShotRef>(null);
 
   const canPrint = bluetoothPrintService.isSupported();
+  const header = buildPrintHeaderFromSettings(settings);
+  const { result, notes } = params.receipt;
+  const { pendingConfirm } = params;
 
-  useEffect(() => {
-    if (!params.customerId) {
+  const handleConfirmPending = async () => {
+    if (!pendingConfirm) {
       return;
     }
-    let cancelled = false;
-    customerService
-      .get(params.customerId)
-      .then(c => {
-        if (!cancelled) {
-          setCustomerOutstandingBalance(c.net_balance ?? null);
-        }
-      })
-      .catch(() => {
-        // Best-effort — the receipt still works fine without this line.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [params.customerId]);
+    setConfirming(true);
+    try {
+      await pendingConfirm.onConfirm();
+    } finally {
+      setConfirming(false);
+    }
+  };
 
   const promptPrinterSetup = (message: string) => {
     showConfirm({
@@ -77,12 +72,7 @@ export const CustomerSaleReceiptScreen: React.FC = () => {
     setSavingImage(true);
     try {
       const message = await downloadReceiptAsImage(receiptShotRef, params.receipt);
-      showError({
-        title: 'Image saved',
-        message,
-        variant: 'info',
-        confirmLabel: 'OK',
-      });
+      showError({ title: 'Image saved', message, variant: 'info', confirmLabel: 'OK' });
     } catch (e) {
       showError({
         title: 'Download failed',
@@ -122,11 +112,11 @@ export const CustomerSaleReceiptScreen: React.FC = () => {
         // Couldn't read the setting or capture the preview — fall back to the
         // normal text receipt below instead of blocking the print entirely.
       }
-      await bluetoothPrintService.printReceipt(
-        params.receipt,
-        currency,
+      await bluetoothPrintService.printPaymentReceipt(
+        result,
+        header,
+        notes,
         settings,
-        params.customerId,
         capturedImageBase64,
       );
     } catch (e) {
@@ -146,49 +136,71 @@ export const CustomerSaleReceiptScreen: React.FC = () => {
   return (
     <ScreenContainer>
       <AppHeader
-        title="Sales receipt"
-        subtitle={params.receipt.sale.sales_id}
+        title={pendingConfirm ? pendingConfirm.title : 'Payment receipt'}
+        subtitle={result.customer.customer_name}
         showBack
       />
 
+      {pendingConfirm ? (
+        <Box px="$4" pt="$2">
+          <Text size="xs" color={colors.textMuted}>
+            Please check every detail below — this cannot be edited after it&apos;s
+            confirmed.
+          </Text>
+        </Box>
+      ) : null}
+
       <SmoothScrollView
-        contentContainerStyle={{
-          padding: 16,
-          alignItems: 'center',
-        }}
+        contentContainerStyle={{ padding: 16, alignItems: 'center' }}
         contentPaddingBottom={TAB_BAR_SCROLL_PADDING}>
         <View style={{ width: '100%', maxWidth: 400 }} collapsable={false}>
           <ViewShot
             ref={receiptShotRef}
             options={{ format: 'png', quality: 1, result: 'tmpfile' }}
             style={{ backgroundColor: '#fff' }}>
-            <SaleReceiptView
-              receipt={params.receipt}
-              settings={settings}
-              customerOutstandingBalance={customerOutstandingBalance}
-            />
+            <PaymentReceiptView result={result} notes={notes} header={header} settings={settings} />
           </ViewShot>
         </View>
 
         <Box w="100%" maxWidth={400} gap="$2" mt="$3">
-          <PrimaryButton
-            label={savingImage ? 'Saving…' : 'Download receipt image'}
-            variant="outline"
-            onPress={handleDownloadImage}
-            loading={savingImage}
-          />
-          <PrimaryButton
-            label="Share receipt image"
-            variant="outline"
-            onPress={handleShareImage}
-            disabled={savingImage}
-          />
+          {pendingConfirm ? (
+            <>
+              <PrimaryButton
+                label={pendingConfirm.confirmLabel}
+                onPress={handleConfirmPending}
+                loading={confirming}
+              />
+              <PrimaryButton
+                label="Edit"
+                variant="outline"
+                onPress={pendingConfirm.onEdit}
+                disabled={confirming}
+              />
+            </>
+          ) : (
+            <>
+              <PrimaryButton
+                label={savingImage ? 'Saving…' : 'Download receipt image'}
+                variant="outline"
+                onPress={handleDownloadImage}
+                loading={savingImage}
+              />
+              <PrimaryButton
+                label="Share receipt image"
+                variant="outline"
+                onPress={handleShareImage}
+                disabled={savingImage}
+              />
 
-          <ReceiptActions
-            showPrint={canPrint}
-            onPrint={canPrint ? handlePrint : undefined}
-            printLoading={printing}
-          />
+              <ReceiptActions
+                showPrint={canPrint}
+                onPrint={canPrint ? handlePrint : undefined}
+                onNewSale={() => navigation.goBack()}
+                secondaryLabel="Done"
+                printLoading={printing}
+              />
+            </>
+          )}
         </Box>
       </SmoothScrollView>
     </ScreenContainer>
