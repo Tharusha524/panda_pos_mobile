@@ -43,6 +43,7 @@ import {
 } from '@/theme';
 import type { HomeStackParamList } from '@/navigation/types';
 import type { CustomerSummary } from '@/types/sales';
+import type { OutstandingBill } from '@/types/customers';
 
 type Nav = NativeStackNavigationProp<HomeStackParamList, 'CustomerReceivePayment'>;
 type Route = RouteProp<HomeStackParamList, 'CustomerReceivePayment'>;
@@ -68,6 +69,8 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [printing, setPrinting] = useState(false);
   const [customer, setCustomer] = useState<CustomerSummary | null>(null);
+  const [bills, setBills] = useState<OutstandingBill[]>([]);
+  const [selectedBillId, setSelectedBillId] = useState<number | null>(null);
   const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [chequeNumber, setChequeNumber] = useState('');
@@ -80,9 +83,13 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
     let cancelled = false;
     (async () => {
       try {
-        const data = await customerService.get(customerId);
+        const [data, outstandingBills] = await Promise.all([
+          customerService.get(customerId),
+          customerService.outstandingBills(customerId).catch(() => []),
+        ]);
         if (!cancelled) {
           setCustomer(data);
+          setBills(outstandingBills);
         }
       } catch (e) {
         if (!cancelled) {
@@ -100,6 +107,10 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
   }, [customerId, showErrorFromUnknown]);
 
   const outstanding = Math.max(0, customer?.net_balance ?? 0);
+  const selectedBill = bills.find(b => b.sale_id === selectedBillId) ?? null;
+  // A specific bill caps the payment at what that one bill still owes, not
+  // the customer's overall total — same rule the backend enforces.
+  const payCap = selectedBill ? selectedBill.outstanding_amount : outstanding;
   const amountNum = parseFloat(amount.replace(/,/g, '')) || 0;
   const newBalance = Math.max(0, Math.round((outstanding - amountNum) * 100) / 100);
   const printHeader = buildPrintHeaderFromSettings(settings);
@@ -132,6 +143,14 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
       });
       return;
     }
+    if (selectedBill && amountNum > selectedBill.outstanding_amount + 0.01) {
+      showError({
+        title: 'Amount too high',
+        message: `Payment cannot exceed bill ${selectedBill.bill_number ?? ''}'s outstanding amount of ${formatCurrency(selectedBill.outstanding_amount, currency)}.`,
+        variant: 'warning',
+      });
+      return;
+    }
 
     // Nothing is saved yet — land on the real payment receipt screen in
     // "review" mode (same layout used once it's really recorded), and let the
@@ -139,6 +158,8 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
     const paidNotes = notes;
     const paidChequeNumber = isCheque ? chequeNumber.trim() || null : null;
     const paidBankName = isCheque ? bankName.trim() || null : null;
+    const paidSaleId = selectedBill?.sale_id ?? null;
+    const paidBillNumber = selectedBill?.bill_number ?? null;
     navigation.navigate('PaymentReceipt', {
       receipt: {
         result: {
@@ -149,6 +170,7 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
           payment_method: paymentMethod,
           cheque_number: paidChequeNumber,
           bank_name: paidBankName,
+          bill_number: paidBillNumber,
         },
         notes: paidNotes || null,
       },
@@ -164,6 +186,7 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
               notes: paidNotes.trim() || null,
               cheque_number: paidChequeNumber,
               bank_name: paidBankName,
+              sale_id: paidSaleId,
             });
             notifyRefresh(['customers', 'sales', 'dashboard', 'reports']);
             navigation.replace('PaymentReceipt', {
@@ -283,6 +306,49 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
               </Box>
             ) : null}
 
+            {outstanding > 0 && bills.length > 0 ? (
+              <Box style={[styles.card, { marginBottom: 12 }]}>
+                <Label>Which bill? (optional)</Label>
+                <TouchableOpacity
+                  style={[styles.billRow, !selectedBill && styles.billRowActive]}
+                  onPress={() => setSelectedBillId(null)}
+                  accessibilityRole="button">
+                  <Text fontWeight="$semibold" color={colors.text}>
+                    General payment
+                  </Text>
+                  <Text size="xs" color={colors.textSecondary}>
+                    Not tied to a specific bill
+                  </Text>
+                </TouchableOpacity>
+                {bills.map(bill => {
+                  const active = selectedBillId === bill.sale_id;
+                  return (
+                    <TouchableOpacity
+                      key={bill.sale_id}
+                      style={[styles.billRow, active && styles.billRowActive]}
+                      onPress={() => setSelectedBillId(active ? null : bill.sale_id)}
+                      accessibilityRole="button">
+                      <HStack justifyContent="space-between" alignItems="center">
+                        <VStack flex={1}>
+                          <Text fontWeight="$semibold" color={colors.text}>
+                            {bill.bill_number ?? `Bill #${bill.sale_id}`}
+                          </Text>
+                          {bill.date ? (
+                            <Text size="xs" color={colors.textSecondary}>
+                              {bill.date}
+                            </Text>
+                          ) : null}
+                        </VStack>
+                        <Text fontWeight="$bold" color={colors.error}>
+                          {formatCurrency(bill.outstanding_amount, currency)}
+                        </Text>
+                      </HStack>
+                    </TouchableOpacity>
+                  );
+                })}
+              </Box>
+            ) : null}
+
             <Box style={styles.card}>
               <Label>Amount received</Label>
               <TextInput
@@ -297,12 +363,12 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
               {outstanding > 0 ? (
                 <TouchableOpacity
                   style={styles.fullAmountBtn}
-                  onPress={() => setAmount(String(outstanding))}
+                  onPress={() => setAmount(String(payCap))}
                   accessibilityRole="button"
                   accessibilityLabel="Settle full balance">
                   <Wallet size={14} color={colors.primary} />
                   <Text size="sm" fontWeight="$semibold" color={colors.primary}>
-                    Full balance · {formatCurrency(outstanding, currency)}
+                    {selectedBill ? 'Full bill' : 'Full balance'} · {formatCurrency(payCap, currency)}
                   </Text>
                 </TouchableOpacity>
               ) : null}
@@ -438,5 +504,16 @@ const styles = StyleSheet.create({
   multiline: {
     minHeight: 72,
     textAlignVertical: 'top',
+  },
+  billRow: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+  },
+  billRowActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
   },
 });

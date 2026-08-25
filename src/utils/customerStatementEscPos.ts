@@ -130,6 +130,9 @@ export const buildEscPosPaymentReceipt = (
   }
   lines.push(escDivider(ctx));
 
+  if (result.bill_number) {
+    lines.push(escPadLine(ctx, 'Bill', result.bill_number.slice(0, 18)));
+  }
   lines.push(escPadLine(ctx, 'Previous balance', formatPlainAmount(result.previous_balance)));
   lines.push(escPadLine(ctx, 'Amount received', formatPlainAmount(result.payment_received)));
   lines.push(escDivider(ctx, '='));

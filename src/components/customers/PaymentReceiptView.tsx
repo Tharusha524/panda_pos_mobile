@@ -105,6 +105,9 @@ export const PaymentReceiptView: React.FC<PaymentReceiptViewProps> = ({
 
       <View style={[styles.divider, dividerOverride]} />
 
+      {result.bill_number ? (
+        <MetaRow label="Bill" value={result.bill_number} textStyle={bodyText(12)} />
+      ) : null}
       <TotalRow
         label="Previous balance"
         value={formatCurrency(result.previous_balance, currency)}

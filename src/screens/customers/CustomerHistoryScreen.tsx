@@ -21,6 +21,7 @@ import { salesService } from '@/services/api/salesService';
 import { formatCurrency, resolveCurrencyCode } from '@/utils/format';
 import type { HomeStackParamList } from '@/navigation/types';
 import type { CustomerSummary, SaleRecord } from '@/types/sales';
+import type { CustomerPaymentRecord } from '@/types/customers';
 import { colors, TAB_BAR_SCROLL_PADDING } from '@/theme';
 
 type Nav = NativeStackNavigationProp<HomeStackParamList, 'CustomerHistory'>;
@@ -45,6 +46,7 @@ export const CustomerHistoryScreen: React.FC = () => {
   const [receiptLoading, setReceiptLoading] = useState(false);
   const [customer, setCustomer] = useState<CustomerSummary | null>(null);
   const [sales, setSales] = useState<SaleRecord[]>([]);
+  const [payments, setPayments] = useState<CustomerPaymentRecord[]>([]);
 
   const load = useCallback(
     async (silent = false) => {
@@ -52,12 +54,14 @@ export const CustomerHistoryScreen: React.FC = () => {
         setLoading(true);
       }
       try {
-        const [customerData, salesResult] = await Promise.all([
+        const [customerData, salesResult, paymentsResult] = await Promise.all([
           customerService.get(params.customerId),
           salesService.listSales({ customer_id: params.customerId }),
+          customerService.payments(params.customerId).catch(() => []),
         ]);
         setCustomer(customerData);
         setSales(salesResult.sales);
+        setPayments(paymentsResult);
       } catch (e) {
         if (!silent) {
           showErrorFromUnknown(e, 'Customer history');
@@ -171,6 +175,35 @@ export const CustomerHistoryScreen: React.FC = () => {
               No sales history found for this customer.
             </Text>
           ) : null}
+
+          <VStack space="sm">
+            <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }}>
+              Payments received
+            </Text>
+            <ActivityDataTable columns={COLUMNS} emptyMessage="No payments received from this customer.">
+              {payments.map((payment, idx) => (
+                <ActivityTableRow
+                  key={payment.id}
+                  columns={COLUMNS}
+                  isLast={idx === payments.length - 1}
+                  cells={[
+                    <Text key="date" style={{ fontSize: 11, color: colors.text }} numberOfLines={1}>
+                      {payment.date}
+                    </Text>,
+                    <Text key="ref" style={{ fontSize: 11, color: colors.primary, fontWeight: '600' }} numberOfLines={1}>
+                      {payment.bill_number ?? payment.reference ?? '—'}
+                    </Text>,
+                    <Text key="method" style={{ fontSize: 11, color: colors.text }} numberOfLines={1}>
+                      {payment.payment_method ?? '—'}
+                    </Text>,
+                    <Text key="amount" style={{ fontSize: 11, color: colors.success, fontWeight: '600' }} numberOfLines={1}>
+                      {formatCurrency(payment.amount, currency)}
+                    </Text>,
+                  ]}
+                />
+              ))}
+            </ActivityDataTable>
+          </VStack>
         </VStack>
       </SmoothScrollView>
     </ScreenContainer>

@@ -22,6 +22,8 @@ export interface ReceivePaymentPayload {
   location?: string | null;
   cheque_number?: string | null;
   bank_name?: string | null;
+  /** Which old bill this payment settles — optional, see OutstandingBill. */
+  sale_id?: number | null;
 }
 
 export interface ReceivePaymentResult {
@@ -32,6 +34,33 @@ export interface ReceivePaymentResult {
   payment_method: string;
   cheque_number?: string | null;
   bank_name?: string | null;
+  bill_number?: string | null;
+}
+
+/** One of a customer's still-unpaid credit sales — used by the Receive
+ * Payment "which bill" picker. Distinct from the customer's overall
+ * net_balance, which stays the source of truth for the total owed. */
+export interface OutstandingBill {
+  sale_id: number;
+  bill_number: string | null;
+  date: string | null;
+  bill_amount: number;
+  paid_amount: number;
+  outstanding_amount: number;
+}
+
+/** A "receive payment" record for Customer History — distinct from a sale
+ * row, which already covers payment taken at the time of a sale. */
+export interface CustomerPaymentRecord {
+  id: number;
+  date: string | null;
+  reference: string | null;
+  payment_method: string | null;
+  cheque_number: string | null;
+  bank_name: string | null;
+  amount: number;
+  notes: string | null;
+  bill_number: string | null;
 }
 
 /** Passed to the payment receipt review screen — same payment result the "old

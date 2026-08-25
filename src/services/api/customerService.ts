@@ -2,6 +2,8 @@ import { apiClient } from '@/services/api/client';
 import type { ApiSuccessResponse } from '@/types/auth';
 import type {
   CustomerPayload,
+  CustomerPaymentRecord,
+  OutstandingBill,
   ReceivePaymentPayload,
   ReceivePaymentResult,
 } from '@/types/customers';
@@ -100,6 +102,30 @@ export const customerService = {
       ...data.data,
       customer: normalizeCustomer(data.data.customer),
     };
+  },
+
+  /** That customer's still-unpaid credit bills, oldest first — for the
+   * Receive Payment "which bill" picker. */
+  async outstandingBills(id: number): Promise<OutstandingBill[]> {
+    const { data } = await apiClient.get<ApiSuccessResponse<OutstandingBill[]>>(
+      `/customers/${id}/outstanding-bills`,
+    );
+    if (!data.success) {
+      throw new Error(data.message ?? 'Failed to load outstanding bills');
+    }
+    return data.data ?? [];
+  },
+
+  /** "Receive payment" records for a customer — for Customer History, which
+   * otherwise only lists their sales. */
+  async payments(id: number): Promise<CustomerPaymentRecord[]> {
+    const { data } = await apiClient.get<ApiSuccessResponse<CustomerPaymentRecord[]>>(
+      `/customers/${id}/payments`,
+    );
+    if (!data.success) {
+      throw new Error(data.message ?? 'Failed to load customer payments');
+    }
+    return data.data ?? [];
   },
 
   async remove(id: number): Promise<void> {
