@@ -61,6 +61,11 @@ export interface CustomerPaymentRecord {
   amount: number;
   notes: string | null;
   bill_number: string | null;
+  /** Frozen at the time this payment was recorded — null for payments made
+   * before this was tracked (the receipt reprint falls back to the
+   * customer's current balance then). */
+  previous_balance: number | null;
+  new_balance: number | null;
 }
 
 /** Passed to the payment receipt review screen — same payment result the "old

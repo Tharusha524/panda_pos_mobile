@@ -111,6 +111,36 @@ export const CustomerHistoryScreen: React.FC = () => {
     [navigation, showError],
   );
 
+  /* ── Tap a payment row → reprint that payment's receipt. No pendingConfirm
+   * — this is a reprint of something already recorded, not a new payment. */
+  const handlePaymentPress = useCallback(
+    (payment: CustomerPaymentRecord) => {
+      if (!customer) {
+        return;
+      }
+      // Older payments recorded before balance snapshots were tracked have
+      // no previous/new balance of their own — fall back to the customer's
+      // current balance rather than showing nothing.
+      const fallbackBalance = Math.max(0, customer.net_balance ?? 0);
+      navigation.navigate('PaymentReceipt', {
+        receipt: {
+          result: {
+            customer,
+            payment_received: payment.amount,
+            previous_balance: payment.previous_balance ?? fallbackBalance,
+            new_balance: payment.new_balance ?? fallbackBalance,
+            payment_method: payment.payment_method ?? 'Cash',
+            cheque_number: payment.cheque_number,
+            bank_name: payment.bank_name,
+            bill_number: payment.bill_number,
+          },
+          notes: payment.notes,
+        },
+      });
+    },
+    [customer, navigation],
+  );
+
   return (
     <ScreenContainer>
       <AppHeader
@@ -182,25 +212,29 @@ export const CustomerHistoryScreen: React.FC = () => {
             </Text>
             <ActivityDataTable columns={COLUMNS} emptyMessage="No payments received from this customer.">
               {payments.map((payment, idx) => (
-                <ActivityTableRow
+                <TouchableOpacity
                   key={payment.id}
-                  columns={COLUMNS}
-                  isLast={idx === payments.length - 1}
-                  cells={[
-                    <Text key="date" style={{ fontSize: 11, color: colors.text }} numberOfLines={1}>
-                      {payment.date}
-                    </Text>,
-                    <Text key="ref" style={{ fontSize: 11, color: colors.primary, fontWeight: '600' }} numberOfLines={1}>
-                      {payment.bill_number ?? payment.reference ?? '—'}
-                    </Text>,
-                    <Text key="method" style={{ fontSize: 11, color: colors.text }} numberOfLines={1}>
-                      {payment.payment_method ?? '—'}
-                    </Text>,
-                    <Text key="amount" style={{ fontSize: 11, color: colors.success, fontWeight: '600' }} numberOfLines={1}>
-                      {formatCurrency(payment.amount, currency)}
-                    </Text>,
-                  ]}
-                />
+                  activeOpacity={0.65}
+                  onPress={() => handlePaymentPress(payment)}>
+                  <ActivityTableRow
+                    columns={COLUMNS}
+                    isLast={idx === payments.length - 1}
+                    cells={[
+                      <Text key="date" style={{ fontSize: 11, color: colors.text }} numberOfLines={1}>
+                        {payment.date}
+                      </Text>,
+                      <Text key="ref" style={{ fontSize: 11, color: colors.primary, fontWeight: '600' }} numberOfLines={1}>
+                        {payment.bill_number ?? payment.reference ?? '—'}
+                      </Text>,
+                      <Text key="method" style={{ fontSize: 11, color: colors.text }} numberOfLines={1}>
+                        {payment.payment_method ?? '—'}
+                      </Text>,
+                      <Text key="amount" style={{ fontSize: 11, color: colors.success, fontWeight: '600' }} numberOfLines={1}>
+                        {formatCurrency(payment.amount, currency)}
+                      </Text>,
+                    ]}
+                  />
+                </TouchableOpacity>
               ))}
             </ActivityDataTable>
           </VStack>

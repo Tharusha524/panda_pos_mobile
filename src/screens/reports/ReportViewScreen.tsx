@@ -72,12 +72,13 @@ export const ReportViewScreen: React.FC = () => {
   // fed that range's sales instead of a single day's, no extra UI needed.
   const isSalesReport = params.type === 'sales_report';
   const pivotExcelSupported = isDailySummary || isSalesReport;
-  // Return report and Customer Settlement are already a flat column/row
-  // table (see reportPayload on the backend) — exported as-is via the
-  // generic table exporter instead of the item-level sales pivot above.
+  // Return report, Customer Settlement, and Credit sales are already a flat
+  // column/row table (see reportPayload on the backend) — exported as-is via
+  // the generic table exporter instead of the item-level sales pivot above.
   const isReturnReport = params.type === 'return_report';
   const isCustomerSettlement = params.type === 'customer_settlement';
-  const genericExcelSupported = isReturnReport || isCustomerSettlement;
+  const isCreditSales = params.type === 'credit_sales';
+  const genericExcelSupported = isReturnReport || isCustomerSettlement || isCreditSales;
   const excelExportSupported = pivotExcelSupported || genericExcelSupported;
   const today = useMemo(() => formatDateYmd(new Date()), []);
   const [salesReportDate, setSalesReportDate] = useState(today);
