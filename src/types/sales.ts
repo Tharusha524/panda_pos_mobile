@@ -129,6 +129,9 @@ export interface SaleRecord {
   payment_method?: string | null;
   amount_received?: number | null;
   notes?: string | null;
+  /** True once a sale-time cheque has been marked as returned (bounced) —
+   * distinct from a product return. See customerService.returnSaleCheque. */
+  cheque_returned?: boolean;
   items: SaleLineItem[];
 }
 

@@ -3,7 +3,8 @@ import { RefreshControl, TouchableOpacity } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { Text, VStack } from '@gluestack-ui/themed';
+import { HStack, Text, VStack } from '@gluestack-ui/themed';
+import { Landmark } from 'lucide-react-native';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { AppHeader } from '@/components/common/AppHeader';
@@ -38,7 +39,7 @@ const COLUMNS: ActivityTableColumn[] = [
 export const CustomerHistoryScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<Route>();
-  const { showErrorFromUnknown, showError } = useErrorDialog();
+  const { showErrorFromUnknown, showError, showConfirm } = useErrorDialog();
   const { settings } = usePosSettings();
   const currency = resolveCurrencyCode(settings?.company?.currency);
 
@@ -47,6 +48,8 @@ export const CustomerHistoryScreen: React.FC = () => {
   const [customer, setCustomer] = useState<CustomerSummary | null>(null);
   const [sales, setSales] = useState<SaleRecord[]>([]);
   const [payments, setPayments] = useState<CustomerPaymentRecord[]>([]);
+  const [returningPaymentId, setReturningPaymentId] = useState<number | null>(null);
+  const [returningSaleId, setReturningSaleId] = useState<number | null>(null);
 
   const load = useCallback(
     async (silent = false) => {
@@ -141,6 +144,66 @@ export const CustomerHistoryScreen: React.FC = () => {
     [customer, navigation],
   );
 
+  /* ── Long-press a cheque payment → mark it as returned (bounced). Only
+   * offered for Cheque payments that haven't already been returned. On
+   * success, opens the image receipt documenting the return. */
+  const handlePaymentLongPress = useCallback(
+    (payment: CustomerPaymentRecord) => {
+      if (payment.payment_method !== 'Cheque' || payment.is_returned) {
+        return;
+      }
+      showConfirm({
+        title: 'Mark cheque as returned?',
+        message: `${formatCurrency(payment.amount, currency)} will be added back to this customer's outstanding balance, and the bill it settled (if any) will be outstanding again. This can't be undone.`,
+        confirmLabel: 'Mark returned',
+        cancelLabel: 'Cancel',
+        onConfirm: async () => {
+          setReturningPaymentId(payment.id);
+          try {
+            const result = await customerService.returnPayment(params.customerId, payment.id);
+            await load(true);
+            navigation.navigate('ChequeReturnReceipt', { receipt: { result } });
+          } catch (e) {
+            showErrorFromUnknown(e, 'Mark cheque returned');
+          } finally {
+            setReturningPaymentId(null);
+          }
+        },
+      });
+    },
+    [currency, load, navigation, params.customerId, showConfirm, showErrorFromUnknown],
+  );
+
+  /* ── Long-press a cheque-paid sale → mark that cheque as returned. The
+   * sale itself (items, inventory) is untouched — only its payment status
+   * flips, adding its amount back to the customer's balance as credit. */
+  const handleSaleLongPress = useCallback(
+    (sale: SaleRecord) => {
+      if (sale.payment_method !== 'Cheque' || sale.cheque_returned) {
+        return;
+      }
+      showConfirm({
+        title: 'Mark cheque as returned?',
+        message: `${formatCurrency(sale.net_amount, currency)} will be added to this customer's outstanding balance as credit owed, and this bill will become pickable in Receive Payment. This can't be undone.`,
+        confirmLabel: 'Mark returned',
+        cancelLabel: 'Cancel',
+        onConfirm: async () => {
+          setReturningSaleId(sale.id);
+          try {
+            const result = await customerService.returnSaleCheque(params.customerId, sale.id);
+            await load(true);
+            navigation.navigate('ChequeReturnReceipt', { receipt: { result } });
+          } catch (e) {
+            showErrorFromUnknown(e, 'Mark cheque returned');
+          } finally {
+            setReturningSaleId(null);
+          }
+        },
+      });
+    },
+    [currency, load, navigation, params.customerId, showConfirm, showErrorFromUnknown],
+  );
+
   return (
     <ScreenContainer>
       <AppHeader
@@ -172,32 +235,55 @@ export const CustomerHistoryScreen: React.FC = () => {
               Sales history
             </Text>
             <ActivityDataTable columns={COLUMNS} emptyMessage="No sales found for this customer.">
-              {sales.map((sale, idx) => (
-                <TouchableOpacity
-                  key={sale.id}
-                  activeOpacity={0.65}
-                  onPress={() => handleRowPress(sale)}>
-                  <ActivityTableRow
-                    columns={COLUMNS}
-                    isLast={idx === sales.length - 1}
-                    cells={[
-                      <Text key="date" style={{ fontSize: 11, color: colors.text }} numberOfLines={1}>
-                        {sale.sale_date}
-                      </Text>,
-                      <Text key="ref" style={{ fontSize: 11, color: colors.primary, fontWeight: '600' }} numberOfLines={1}>
-                        {sale.sales_id}
-                      </Text>,
-                      <Text key="method" style={{ fontSize: 11, color: colors.text }} numberOfLines={1}>
-                        {sale.payment_method ?? '—'}
-                      </Text>,
-                      <Text key="amount" style={{ fontSize: 11, color: colors.text, fontWeight: '600' }} numberOfLines={1}>
-                        {formatCurrency(sale.net_amount, currency)}
-                      </Text>,
-                    ]}
-                  />
-                </TouchableOpacity>
-              ))}
+              {sales.map((sale, idx) => {
+                const isCheque = sale.payment_method === 'Cheque';
+                return (
+                  <TouchableOpacity
+                    key={sale.id}
+                    activeOpacity={0.65}
+                    disabled={returningSaleId === sale.id}
+                    onPress={() => handleRowPress(sale)}
+                    onLongPress={() => handleSaleLongPress(sale)}>
+                    <ActivityTableRow
+                      columns={COLUMNS}
+                      isLast={idx === sales.length - 1}
+                      accent={sale.cheque_returned ? 'return' : 'default'}
+                      cells={[
+                        <Text key="date" style={{ fontSize: 11, color: colors.text }} numberOfLines={1}>
+                          {sale.sale_date}
+                        </Text>,
+                        <Text key="ref" style={{ fontSize: 11, color: colors.primary, fontWeight: '600' }} numberOfLines={1}>
+                          {sale.sales_id}
+                        </Text>,
+                        <HStack key="method" alignItems="center" gap="$1">
+                          {isCheque ? <Landmark size={12} color={colors.textSecondary} /> : null}
+                          <Text style={{ fontSize: 11, color: colors.text }} numberOfLines={1}>
+                            {sale.payment_method ?? '—'}
+                            {sale.cheque_returned ? ' (Returned)' : ''}
+                          </Text>
+                        </HStack>,
+                        <Text
+                          key="amount"
+                          style={{
+                            fontSize: 11,
+                            fontWeight: '600',
+                            color: sale.cheque_returned ? colors.textMuted : colors.text,
+                            textDecorationLine: sale.cheque_returned ? 'line-through' : 'none',
+                          }}
+                          numberOfLines={1}>
+                          {formatCurrency(sale.net_amount, currency)}
+                        </Text>,
+                      ]}
+                    />
+                  </TouchableOpacity>
+                );
+              })}
             </ActivityDataTable>
+            {sales.some(s => s.payment_method === 'Cheque' && !s.cheque_returned) ? (
+              <Text size="2xs" color={colors.textMuted} px="$1">
+                Long-press a cheque sale to mark it as returned (bounced).
+              </Text>
+            ) : null}
           </VStack>
 
           {!loading && sales.length === 0 ? (
@@ -211,32 +297,57 @@ export const CustomerHistoryScreen: React.FC = () => {
               Payments received
             </Text>
             <ActivityDataTable columns={COLUMNS} emptyMessage="No payments received from this customer.">
-              {payments.map((payment, idx) => (
-                <TouchableOpacity
-                  key={payment.id}
-                  activeOpacity={0.65}
-                  onPress={() => handlePaymentPress(payment)}>
-                  <ActivityTableRow
-                    columns={COLUMNS}
-                    isLast={idx === payments.length - 1}
-                    cells={[
-                      <Text key="date" style={{ fontSize: 11, color: colors.text }} numberOfLines={1}>
-                        {payment.date}
-                      </Text>,
-                      <Text key="ref" style={{ fontSize: 11, color: colors.primary, fontWeight: '600' }} numberOfLines={1}>
-                        {payment.bill_number ?? payment.reference ?? '—'}
-                      </Text>,
-                      <Text key="method" style={{ fontSize: 11, color: colors.text }} numberOfLines={1}>
-                        {payment.payment_method ?? '—'}
-                      </Text>,
-                      <Text key="amount" style={{ fontSize: 11, color: colors.success, fontWeight: '600' }} numberOfLines={1}>
-                        {formatCurrency(payment.amount, currency)}
-                      </Text>,
-                    ]}
-                  />
-                </TouchableOpacity>
-              ))}
+              {payments.map((payment, idx) => {
+                const isCheque = payment.payment_method === 'Cheque';
+                return (
+                  <TouchableOpacity
+                    key={payment.id}
+                    activeOpacity={0.65}
+                    disabled={returningPaymentId === payment.id}
+                    onPress={() => handlePaymentPress(payment)}
+                    onLongPress={() => handlePaymentLongPress(payment)}>
+                    <ActivityTableRow
+                      columns={COLUMNS}
+                      isLast={idx === payments.length - 1}
+                      accent={payment.is_returned ? 'return' : 'default'}
+                      cells={[
+                        <Text key="date" style={{ fontSize: 11, color: colors.text }} numberOfLines={1}>
+                          {payment.date}
+                        </Text>,
+                        <Text key="ref" style={{ fontSize: 11, color: colors.primary, fontWeight: '600' }} numberOfLines={1}>
+                          {payment.bill_number ?? payment.reference ?? '—'}
+                        </Text>,
+                        <HStack key="method" alignItems="center" gap="$1">
+                          {isCheque ? <Landmark size={12} color={colors.textSecondary} /> : null}
+                          <Text
+                            style={{ fontSize: 11, color: colors.text }}
+                            numberOfLines={1}>
+                            {payment.payment_method ?? '—'}
+                            {payment.is_returned ? ' (Returned)' : ''}
+                          </Text>
+                        </HStack>,
+                        <Text
+                          key="amount"
+                          style={{
+                            fontSize: 11,
+                            fontWeight: '600',
+                            color: payment.is_returned ? colors.textMuted : colors.success,
+                            textDecorationLine: payment.is_returned ? 'line-through' : 'none',
+                          }}
+                          numberOfLines={1}>
+                          {formatCurrency(payment.amount, currency)}
+                        </Text>,
+                      ]}
+                    />
+                  </TouchableOpacity>
+                );
+              })}
             </ActivityDataTable>
+            {payments.some(p => p.payment_method === 'Cheque' && !p.is_returned) ? (
+              <Text size="2xs" color={colors.textMuted} px="$1">
+                Long-press a cheque payment to mark it as returned (bounced).
+              </Text>
+            ) : null}
           </VStack>
         </VStack>
       </SmoothScrollView>

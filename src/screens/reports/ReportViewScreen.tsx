@@ -12,7 +12,6 @@ import { PrimaryButton } from '@/components/buttons/PrimaryButton';
 import { LoadingOverlay } from '@/components/common/LoadingOverlay';
 import { BackendReportView } from '@/components/reports/BackendReportView';
 import { SystemReportView } from '@/components/reports/SystemReportView';
-import { ReportDatePickerField } from '@/components/inputs/ReportDatePickerField';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { ReportFilterBar } from '@/components/reports/ReportFilterBar';
@@ -23,11 +22,9 @@ import { navigateToPrinterSetup } from '@/navigation/navigationRef';
 import { getReportMeta } from '@/types/reports';
 import type { ReportsStackParamList } from '@/navigation/types';
 import type { BackendReportData } from '@/types/backendReports';
-import { colors, shadows } from '@/theme';
+import { colors } from '@/theme';
 import {
   defaultReportFilters,
-  formatDateYmd,
-  formatReportDateLabel,
   formatReportDateRangeLabel,
 } from '@/utils/reportDateFilters';
 import type { ReportFilterParams } from '@/types/reportFilters';
@@ -35,6 +32,10 @@ import { captureReceiptBase64 } from '@/utils/receiptImageShare';
 import { supportsDateFilter, supportsItemFilter } from '@/constants/reportFilterCapabilities';
 import { downloadDailySalesExcel, shareDailySalesExcel } from '@/utils/dailySalesFile';
 import { downloadReportTableExcel, shareReportTableExcel } from '@/utils/reportTableFile';
+import {
+  downloadCustomerSettlementExcel,
+  shareCustomerSettlementExcel,
+} from '@/utils/customerSettlementFile';
 import {
   buildPrintHeaderFromSettings as buildHeader,
   getReceiptPrintCustomization,
@@ -62,38 +63,37 @@ export const ReportViewScreen: React.FC = () => {
   const meta = getReportMeta(params.type);
   const header = useMemo(() => buildHeader(settings), [settings]);
 
-  // Daily Business Summary is otherwise fixed to "today" (see useSystemReport —
-  // the dashboard API it uses takes no date param). This lets that one report
-  // type pick any past day and see/export that day's sales, without touching
-  // the existing today-only dashboard flow above.
+  // Daily Business Summary's dashboard API is fixed to "today" and ignores
+  // the date filter entirely (see useSystemReport) — so instead of showing
+  // that live dashboard, this report type always fetches sales-summary for
+  // whatever range is picked on the filter bar as a side channel, and shows
+  // that instead. Same range-picker UX as the other report types below.
   const isDailySummary = params.type === 'daily_summary';
   // Sales report already has its own date-range picker (ReportFilterBar
   // below) — it reuses the same Excel pivot as Daily Business Summary, just
   // fed that range's sales instead of a single day's, no extra UI needed.
   const isSalesReport = params.type === 'sales_report';
-  const pivotExcelSupported = isDailySummary || isSalesReport;
-  // Return report, Customer Settlement, and Credit sales are already a flat
-  // column/row table (see reportPayload on the backend) — exported as-is via
-  // the generic table exporter instead of the item-level sales pivot above.
+  // Return report also uses the item-level pivot — sales-summary already
+  // returns both sales and returns together (row.transaction_label tells
+  // them apart), so it's filtered down to Return rows only after fetching.
   const isReturnReport = params.type === 'return_report';
+  const pivotExcelSupported = isDailySummary || isSalesReport || isReturnReport;
+  // Customer Settlement and Credit sales are already a flat column/row
+  // table (see reportPayload on the backend) — exported as-is via the
+  // generic table exporter instead of the item-level sales pivot above.
   const isCustomerSettlement = params.type === 'customer_settlement';
   const isCreditSales = params.type === 'credit_sales';
-  const genericExcelSupported = isReturnReport || isCustomerSettlement || isCreditSales;
+  const genericExcelSupported = isCustomerSettlement || isCreditSales;
   const excelExportSupported = pivotExcelSupported || genericExcelSupported;
-  const today = useMemo(() => formatDateYmd(new Date()), []);
-  const [salesReportDate, setSalesReportDate] = useState(today);
-  const isPastDateSelected = isDailySummary && salesReportDate !== today;
   const [dailySalesReport, setDailySalesReport] = useState<BackendReportData | null>(null);
   const [dailySalesLoading, setDailySalesLoading] = useState(false);
   const [dailySalesError, setDailySalesError] = useState<string | null>(null);
   const [exportingExcel, setExportingExcel] = useState<'download' | 'share' | null>(null);
 
-  // Sales report / Return report / Customer Settlement all use the normal
-  // filter bar's date range; only Daily Business Summary has its own
-  // single-day picker (salesReportDate above).
-  const usesFilterDateRange = isSalesReport || genericExcelSupported;
-  const excelDateFrom = usesFilterDateRange ? filters.dateFrom : salesReportDate;
-  const excelDateTo = usesFilterDateRange ? filters.dateTo : salesReportDate;
+  // All of Daily Business Summary / Sales report / Return report / Customer
+  // Settlement / Credit sales now use the normal filter bar's date range.
+  const excelDateFrom = filters.dateFrom;
+  const excelDateTo = filters.dateTo;
 
   useEffect(() => {
     if (!pivotExcelSupported) {
@@ -106,7 +106,11 @@ export const ReportViewScreen: React.FC = () => {
       .fetch('sales-summary', { dateFrom: excelDateFrom, dateTo: excelDateTo })
       .then(report => {
         if (!cancelled) {
-          setDailySalesReport(report);
+          setDailySalesReport(
+            isReturnReport
+              ? { ...report, sales: (report.sales ?? []).filter(s => s.transaction_label === 'Return') }
+              : report,
+          );
         }
       })
       .catch(e => {
@@ -125,12 +129,8 @@ export const ReportViewScreen: React.FC = () => {
   }, [pivotExcelSupported, excelDateFrom, excelDateTo]);
 
   const handleExportExcel = async (action: 'download' | 'share') => {
-    const dateKey = usesFilterDateRange
-      ? `${excelDateFrom}_to_${excelDateTo}`
-      : excelDateFrom;
-    const dateLabel = usesFilterDateRange
-      ? formatReportDateRangeLabel(excelDateFrom, excelDateTo)
-      : formatReportDateLabel(excelDateFrom);
+    const dateKey = `${excelDateFrom}_to_${excelDateTo}`;
+    const dateLabel = formatReportDateRangeLabel(excelDateFrom, excelDateTo);
 
     setExportingExcel(action);
     try {
@@ -141,6 +141,18 @@ export const ReportViewScreen: React.FC = () => {
             message: 'This report is still loading — try again in a moment.',
             variant: 'warning',
           });
+          return;
+        }
+        // Customer Settlement pivots by payment method (route/customer/bill,
+        // one amount column per method, cheque no./bank) — a different
+        // layout from the plain flat-table export the other reports use.
+        if (isCustomerSettlement) {
+          if (action === 'download') {
+            const message = await downloadCustomerSettlementExcel(result.report, dateKey, dateLabel);
+            showError({ title: 'Excel saved', message, variant: 'info', confirmLabel: 'OK' });
+          } else {
+            await shareCustomerSettlementExcel(result.report, dateKey, dateLabel);
+          }
           return;
         }
         if (action === 'download') {
@@ -160,7 +172,11 @@ export const ReportViewScreen: React.FC = () => {
         });
         return;
       }
-      const title = isSalesReport ? 'Sales Report' : 'Daily Sale Report';
+      const title = isSalesReport
+        ? 'Sales Report'
+        : isReturnReport
+          ? 'Return Report'
+          : 'Daily Sale Report';
       if (action === 'download') {
         const message = await downloadDailySalesExcel(
           dailySalesReport.sales ?? [],
@@ -254,8 +270,8 @@ export const ReportViewScreen: React.FC = () => {
   };
 
   const subtitle = useMemo(() => {
-    if (isPastDateSelected) {
-      return formatReportDateLabel(salesReportDate);
+    if (isDailySummary) {
+      return formatReportDateRangeLabel(filters.dateFrom, filters.dateTo);
     }
     if (result?.source === 'dashboard') {
       return result.report.subtitle ?? formatReportDateRangeLabel(filters.dateFrom, filters.dateTo);
@@ -273,10 +289,9 @@ export const ReportViewScreen: React.FC = () => {
     filters.dateFrom,
     filters.dateTo,
     filters.itemLabel,
-    isPastDateSelected,
+    isDailySummary,
     meta?.subtitle,
     result,
-    salesReportDate,
   ]);
 
   const scrollBottomPad = Math.max(insets.bottom, 16) + 88;
@@ -308,25 +323,6 @@ export const ReportViewScreen: React.FC = () => {
         />
 
         {isDailySummary ? (
-          <Box
-            w="100%"
-            maxWidth={400}
-            bg={colors.white}
-            borderRadius="$xl"
-            borderWidth={1}
-            borderColor={colors.border}
-            p="$4"
-            mb="$4"
-            style={shadows.sm}>
-            <ReportDatePickerField
-              label="Report day"
-              value={salesReportDate}
-              onChange={setSalesReportDate}
-            />
-          </Box>
-        ) : null}
-
-        {isPastDateSelected ? (
           <>
             {dailySalesLoading && !dailySalesReport ? (
               <LoadingOverlay message="Loading day's sales…" />

@@ -135,6 +135,14 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
       });
       return;
     }
+    if (!selectedBill) {
+      showError({
+        title: 'Select a bill',
+        message: 'Pick which bill this payment is for before continuing.',
+        variant: 'warning',
+      });
+      return;
+    }
     if (amountNum > outstanding + 0.01) {
       showError({
         title: 'Amount too high',
@@ -143,7 +151,7 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
       });
       return;
     }
-    if (selectedBill && amountNum > selectedBill.outstanding_amount + 0.01) {
+    if (amountNum > selectedBill.outstanding_amount + 0.01) {
       showError({
         title: 'Amount too high',
         message: `Payment cannot exceed bill ${selectedBill.bill_number ?? ''}'s outstanding amount of ${formatCurrency(selectedBill.outstanding_amount, currency)}.`,
@@ -306,20 +314,18 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
               </Box>
             ) : null}
 
+            {outstanding > 0 && bills.length === 0 && !loading ? (
+              <Box style={[styles.card, { marginBottom: 12 }]}>
+                <Text size="sm" color={colors.textSecondary}>
+                  No specific bill could be found to settle for this customer, so a
+                  payment can&apos;t be recorded right now.
+                </Text>
+              </Box>
+            ) : null}
+
             {outstanding > 0 && bills.length > 0 ? (
               <Box style={[styles.card, { marginBottom: 12 }]}>
-                <Label>Which bill? (optional)</Label>
-                <TouchableOpacity
-                  style={[styles.billRow, !selectedBill && styles.billRowActive]}
-                  onPress={() => setSelectedBillId(null)}
-                  accessibilityRole="button">
-                  <Text fontWeight="$semibold" color={colors.text}>
-                    General payment
-                  </Text>
-                  <Text size="xs" color={colors.textSecondary}>
-                    Not tied to a specific bill
-                  </Text>
-                </TouchableOpacity>
+                <Label>Which bill?</Label>
                 {bills.map(bill => {
                   const active = selectedBillId === bill.sale_id;
                   return (
@@ -360,15 +366,15 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
                 placeholderTextColor={appInputPlaceholderColor}
                 editable={outstanding > 0}
               />
-              {outstanding > 0 ? (
+              {outstanding > 0 && selectedBill ? (
                 <TouchableOpacity
                   style={styles.fullAmountBtn}
                   onPress={() => setAmount(String(payCap))}
                   accessibilityRole="button"
-                  accessibilityLabel="Settle full balance">
+                  accessibilityLabel="Settle full bill">
                   <Wallet size={14} color={colors.primary} />
                   <Text size="sm" fontWeight="$semibold" color={colors.primary}>
-                    {selectedBill ? 'Full bill' : 'Full balance'} · {formatCurrency(payCap, currency)}
+                    Full bill · {formatCurrency(payCap, currency)}
                   </Text>
                 </TouchableOpacity>
               ) : null}
@@ -421,7 +427,7 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
                 <PrimaryButton
                   label="Receive payment"
                   onPress={handleReceive}
-                  disabled={loading || outstanding <= 0}
+                  disabled={loading || outstanding <= 0 || bills.length === 0}
                 />
               </VStack>
             </Box>

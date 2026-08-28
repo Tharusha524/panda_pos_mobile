@@ -2,7 +2,7 @@ import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { PurchaseReceiptPayload } from '@/types/inventory';
 import type { ItemSelectAction } from '@/types/inventory';
 import type { SaleReceiptPayload } from '@/types/sales';
-import type { PaymentReceiptPayload } from '@/types/customers';
+import type { ChequeReturnReceiptPayload, PaymentReceiptPayload } from '@/types/customers';
 import type { PaymentDetailPayload } from '@/types/payments';
 import type { SystemReportType, ReportCategoryId } from '@/types/reports';
 
@@ -29,6 +29,7 @@ export type HomeStackParamList = {
   CustomerHistory: { customerId: number };
   CustomerSaleReceipt: { receipt: SaleReceiptPayload; customerId?: number | null };
   PaymentReceipt: { receipt: PaymentReceiptPayload; pendingConfirm?: PendingConfirm };
+  ChequeReturnReceipt: { receipt: ChequeReturnReceiptPayload };
   PaymentDetailReceipt: { payment: PaymentDetailPayload };
   ExpensesList: undefined;
   ExpenseForm: { expenseId?: number };

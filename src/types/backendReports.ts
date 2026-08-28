@@ -32,6 +32,7 @@ export interface SalesSummarySale {
   date: string;
   sales_id: string | null;
   customer: string;
+  route?: string | null;
   location: string | null;
   transaction_label: string;
   sub_total: number;

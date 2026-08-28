@@ -15,7 +15,7 @@ import { formatPrintAmount, resolveCurrencyCode } from '@/utils/format';
 import { formatReceiptQtyDetail, resolveLineUom } from '@/utils/uom';
 import type { SaleReceiptPayload } from '@/types/sales';
 import type { PurchaseReceiptPayload } from '@/types/inventory';
-import type { PaymentReceiptPayload } from '@/types/customers';
+import type { ChequeReturnReceiptPayload, PaymentReceiptPayload } from '@/types/customers';
 
 export type ReceiptCaptureRef = RefObject<ViewShotRef | null>;
 
@@ -188,13 +188,22 @@ async function saveUriToGallery(uri: string, salesId: string): Promise<string> {
   }
 }
 
-type ShareableReceipt = SaleReceiptPayload | PurchaseReceiptPayload | PaymentReceiptPayload;
+type ShareableReceipt =
+  | SaleReceiptPayload
+  | PurchaseReceiptPayload
+  | PaymentReceiptPayload
+  | ChequeReturnReceiptPayload;
 
 function getReceiptReference(receipt: ShareableReceipt): string {
   if ('purchase' in receipt) {
     return receipt.purchase.invoice_id;
   }
   if ('result' in receipt) {
+    // Both payment and cheque-return receipts carry a `result` — only the
+    // latter has `amount_returned`.
+    if ('amount_returned' in receipt.result) {
+      return `Cheque-Return-${receipt.result.reference ?? receipt.result.customer.customer_name}`;
+    }
     return `Payment-${receipt.result.customer.customer_name}`;
   }
   return receipt.sale.sales_id;

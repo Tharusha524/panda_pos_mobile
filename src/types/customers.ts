@@ -66,6 +66,23 @@ export interface CustomerPaymentRecord {
    * customer's current balance then). */
   previous_balance: number | null;
   new_balance: number | null;
+  /** True once this payment has been marked as returned (e.g. a bounced
+   * cheque) — see customerService.returnPayment. */
+  is_returned: boolean;
+}
+
+/** Result of reversing a cheque — either a Receive Payment cheque
+ * (source: 'payment') or a sale-time cheque (source: 'sale'). Same shape
+ * either way so one receipt view/screen covers both. */
+export interface ChequeReturnResult {
+  customer: CustomerSummary;
+  source: 'payment' | 'sale';
+  reference: string | null;
+  cheque_number: string | null;
+  bank_name: string | null;
+  amount_returned: number;
+  previous_balance: number;
+  new_balance: number;
 }
 
 /** Passed to the payment receipt review screen — same payment result the "old
@@ -73,6 +90,12 @@ export interface CustomerPaymentRecord {
 export interface PaymentReceiptPayload {
   result: ReceivePaymentResult;
   notes: string | null;
+}
+
+/** Passed to the cheque return receipt screen — image-only (download/share),
+ * no Bluetooth thermal print support for this one. */
+export interface ChequeReturnReceiptPayload {
+  result: ChequeReturnResult;
 }
 
 export interface CustomerPayload {

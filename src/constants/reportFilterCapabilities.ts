@@ -8,7 +8,9 @@ import type { SystemReportType } from '@/types/reports';
  * hidden in the UI rather than shown as if it does something.
  */
 const DATE_FILTER_UNSUPPORTED: ReadonlySet<SystemReportType> = new Set<SystemReportType>([
-  'daily_summary', // fixed to today (dashboard API takes no date params)
+  // daily_summary now has its own picked-range flow (see ReportViewScreen —
+  // the dashboard API itself still ignores the filter, so that screen fetches
+  // sales-summary for the picked range as a side channel instead).
   'customer_report', // live current balances, not date-scoped
   'item_report', // live current stock, not date-scoped
   'reorder', // live current stock, not date-scoped
