@@ -7,6 +7,9 @@ interface ReceiptActionsProps {
   onNewSale?: () => void;
   printLoading?: boolean;
   showPrint?: boolean;
+  /** Label for the secondary button — defaults to "New sale" for the sale receipt
+   * flow; other receipt screens (e.g. payment receipt) pass their own, like "Done". */
+  secondaryLabel?: string;
 }
 
 export const ReceiptActions: React.FC<ReceiptActionsProps> = ({
@@ -14,11 +17,12 @@ export const ReceiptActions: React.FC<ReceiptActionsProps> = ({
   onNewSale,
   printLoading = false,
   showPrint = true,
+  secondaryLabel = 'New sale',
 }) => {
   if (!showPrint || !onPrint) {
     return onNewSale ? (
       <View style={styles.wrap}>
-        <PrimaryButton label="New sale" onPress={onNewSale} />
+        <PrimaryButton label={secondaryLabel} onPress={onNewSale} />
       </View>
     ) : null;
   }
@@ -36,7 +40,7 @@ export const ReceiptActions: React.FC<ReceiptActionsProps> = ({
         </View>
         {onNewSale ? (
           <View style={styles.col}>
-            <PrimaryButton label="New sale" variant="outline" onPress={onNewSale} />
+            <PrimaryButton label={secondaryLabel} variant="outline" onPress={onNewSale} />
           </View>
         ) : null}
       </View>

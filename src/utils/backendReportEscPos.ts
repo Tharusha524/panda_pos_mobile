@@ -1,9 +1,10 @@
 import type { PosMobileSettings } from '@/types/settings';
 import type { ReceiptPrintCustomization } from '@/types/receiptPrint';
 import type { BackendReportData } from '@/types/backendReports';
-import type { SystemReportHeader } from '@/types/reports';
+import type { SystemReportHeader, SystemReportType } from '@/types/reports';
 import { resolveCurrencyCode, formatPrintAmount } from '@/utils/format';
 import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
+import { filterReportColumns } from '@/constants/reportColumnFilters';
 import {
   createReceiptLayout,
   escDivider,
@@ -18,6 +19,10 @@ export type BuildBackendReportEscPosOptions = {
   currency?: string | null;
   customization?: ReceiptPrintCustomization | null;
   settings?: PosMobileSettings | null;
+  /** Which catalog report this is — lets wide reports trim down to their
+   * highest-value columns instead of the first three positionally (see
+   * reportColumnFilters). Omit to keep the old first-three-columns behavior. */
+  reportType?: SystemReportType;
 };
 
 const formatValue = (value: unknown, code: string): string => {
@@ -114,10 +119,18 @@ export const buildEscPosBackendReport = (
       lines.push(escLine(ctx, ''));
     }
   } else if (report.columns.length && report.rows.length) {
+    // Curated reports (see reportColumnFilters) print all of their allowlisted
+    // columns; everything else keeps the old default of the first three
+    // columns positionally, so unaffected reports print exactly as before.
+    const curated = options?.reportType
+      ? filterReportColumns(options.reportType, report.columns)
+      : report.columns;
+    const displayColumns =
+      curated.length < report.columns.length ? curated : report.columns.slice(0, 3);
     for (const row of report.rows.slice(0, 80)) {
-      const parts = report.columns
-        .slice(0, 3)
-        .map(col => `${col.label}: ${formatValue(row[col.key], code)}`);
+      const parts = displayColumns.map(
+        col => `${col.label}: ${formatValue(row[col.key], code)}`,
+      );
       lines.push(escLine(ctx, parts.join(' | ')));
     }
     if (report.rows.length > 80) {

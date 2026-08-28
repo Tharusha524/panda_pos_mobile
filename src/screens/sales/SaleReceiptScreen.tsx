@@ -1,8 +1,8 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import ViewShot, { type ViewShotRef } from 'react-native-view-shot';
-import { Box } from '@gluestack-ui/themed';
+import { Box, Text } from '@gluestack-ui/themed';
 import { useNavigation, useRoute, CommonActions } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
@@ -20,7 +20,8 @@ import {
   shareReceiptImageFile,
 } from '@/utils/receiptImageShare';
 import { getReceiptPrintCustomization } from '@/utils/receiptPrintCustomization';
-import { TAB_BAR_SCROLL_PADDING } from '@/theme';
+import { customerService } from '@/services/api/customerService';
+import { colors, TAB_BAR_SCROLL_PADDING } from '@/theme';
 import type { SalesStackParamList } from '@/navigation/types';
 
 type Route = RouteProp<SalesStackParamList, 'SaleReceipt'>;
@@ -35,9 +36,46 @@ export const SaleReceiptScreen: React.FC = () => {
   const { showError, showConfirm } = useErrorDialog();
   const [printing, setPrinting] = useState(false);
   const [savingImage, setSavingImage] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const { pendingConfirm } = params;
+
+  const handleConfirmPending = async () => {
+    if (!pendingConfirm) {
+      return;
+    }
+    setConfirming(true);
+    try {
+      await pendingConfirm.onConfirm();
+    } finally {
+      setConfirming(false);
+    }
+  };
+  const [customerOutstandingBalance, setCustomerOutstandingBalance] = useState<
+    number | null
+  >(null);
   const receiptShotRef = useRef<ViewShotRef>(null);
 
   const canPrint = bluetoothPrintService.isSupported();
+
+  useEffect(() => {
+    if (!params.customerId) {
+      return;
+    }
+    let cancelled = false;
+    customerService
+      .get(params.customerId)
+      .then(c => {
+        if (!cancelled) {
+          setCustomerOutstandingBalance(c.net_balance ?? null);
+        }
+      })
+      .catch(() => {
+        // Best-effort — the receipt still works fine without this line.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [params.customerId]);
 
   const goNewSale = () => {
     navigation.dispatch(
@@ -111,7 +149,7 @@ export const SaleReceiptScreen: React.FC = () => {
         params.receipt,
         currency,
         settings,
-        undefined,
+        params.customerId,
         capturedImageBase64,
       );
     } catch (e) {
@@ -131,10 +169,19 @@ export const SaleReceiptScreen: React.FC = () => {
   return (
     <ScreenContainer>
       <AppHeader
-        title="Sales receipt"
+        title={pendingConfirm ? pendingConfirm.title : 'Sales receipt'}
         subtitle={params.receipt.sale.sales_id}
         showBack
       />
+
+      {pendingConfirm ? (
+        <Box px="$4" pt="$2">
+          <Text size="xs" color={colors.textMuted}>
+            Please check every detail below — this cannot be edited after it&apos;s
+            confirmed.
+          </Text>
+        </Box>
+      ) : null}
 
       <SmoothScrollView
         contentContainerStyle={{
@@ -147,30 +194,52 @@ export const SaleReceiptScreen: React.FC = () => {
             ref={receiptShotRef}
             options={{ format: 'png', quality: 1, result: 'tmpfile' }}
             style={{ backgroundColor: '#fff' }}>
-            <SaleReceiptView receipt={params.receipt} settings={settings} />
+            <SaleReceiptView
+              receipt={params.receipt}
+              settings={settings}
+              customerOutstandingBalance={customerOutstandingBalance}
+            />
           </ViewShot>
         </View>
 
         <Box w="100%" maxWidth={400} gap="$2" mt="$3">
-          <PrimaryButton
-            label={savingImage ? 'Saving…' : 'Download receipt image'}
-            variant="outline"
-            onPress={handleDownloadImage}
-            loading={savingImage}
-          />
-          <PrimaryButton
-            label="Share receipt image"
-            variant="outline"
-            onPress={handleShareImage}
-            disabled={savingImage}
-          />
+          {pendingConfirm ? (
+            <>
+              <PrimaryButton
+                label={pendingConfirm.confirmLabel}
+                onPress={handleConfirmPending}
+                loading={confirming}
+              />
+              <PrimaryButton
+                label="Edit"
+                variant="outline"
+                onPress={pendingConfirm.onEdit}
+                disabled={confirming}
+              />
+            </>
+          ) : (
+            <>
+              <PrimaryButton
+                label={savingImage ? 'Saving…' : 'Download receipt image'}
+                variant="outline"
+                onPress={handleDownloadImage}
+                loading={savingImage}
+              />
+              <PrimaryButton
+                label="Share receipt image"
+                variant="outline"
+                onPress={handleShareImage}
+                disabled={savingImage}
+              />
 
-          <ReceiptActions
-            showPrint={canPrint}
-            onPrint={canPrint ? handlePrint : undefined}
-            onNewSale={goNewSale}
-            printLoading={printing}
-          />
+              <ReceiptActions
+                showPrint={canPrint}
+                onPrint={canPrint ? handlePrint : undefined}
+                onNewSale={goNewSale}
+                printLoading={printing}
+              />
+            </>
+          )}
         </Box>
       </SmoothScrollView>
     </ScreenContainer>

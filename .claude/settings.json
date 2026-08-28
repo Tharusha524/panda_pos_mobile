@@ -1,7 +1,21 @@
 {
   "permissions": {
     "allow": [
-      "Bash(\"E:/android/platform-tools/adb.exe\" devices *)"
+      "Bash(\"E:/android/platform-tools/adb.exe\" devices *)",
+      "Bash(adb -s RF8R10V12XA install -r android/app/build/outputs/apk/release/app-release.apk)",
+      "Bash(./node_modules/.bin/tsc --noEmit -p tsconfig.json)",
+      "Bash(php -l \"/e/final_pos-system-main/backend/app/Services/ReportService.php\")",
+      "Bash(php -l \"/e/final_pos-system-main/backend/app/Http/Controllers/Api/ReportController.php\")",
+      "Bash(GRADLE_USER_HOME=/e/gradle-home ./gradlew.bat assembleRelease)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(npm config *)",
+      "Bash(mkdir -p /e/npm-cache *)",
+      "Bash(node -e \"console.log\\(require\\('./package.json'\\).dependencies.xlsx\\)\")",
+      "Bash(node -e \"console.log\\(require\\('./package.json'\\).dependencies['react-native-share']\\)\")",
+      "WebSearch"
+    ],
+    "additionalDirectories": [
+      "E:\\npm-cache"
     ]
   }
 }

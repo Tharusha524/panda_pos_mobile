@@ -1,20 +1,26 @@
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Image, StyleSheet, View, type TextStyle, type ViewStyle } from 'react-native';
 import { HStack, Text, VStack } from '@gluestack-ui/themed';
 import {
   ActivityDataTable,
   ActivityTableRow,
 } from '@/components/common/ActivityDataTable';
+import { useReceiptLogoUri } from '@/hooks/useReceiptLogoUri';
+import { useReceiptStyleScale } from '@/hooks/useReceiptStyleScale';
 import { formatCurrency, resolveCurrencyCode, parseBackendTimestamp } from '@/utils/format';
 import { colors } from '@/theme';
+import { filterReportColumns } from '@/constants/reportColumnFilters';
 import type { BackendReportData } from '@/types/backendReports';
 import type { PosMobileSettings } from '@/types/settings';
-import type { SystemReportHeader } from '@/types/reports';
+import type { SystemReportHeader, SystemReportType } from '@/types/reports';
 
 interface BackendReportViewProps {
   report: BackendReportData;
   header: SystemReportHeader;
   settings?: PosMobileSettings | null;
+  /** Which catalog report this data came from — used to trim wide reports down
+   * to their highest-value columns (see reportColumnFilters). */
+  reportType: SystemReportType;
 }
 
 const formatCell = (value: unknown, currency: string): string => {
@@ -30,17 +36,33 @@ const formatCell = (value: unknown, currency: string): string => {
   return String(value);
 };
 
-const SectionTitle: React.FC<{ title: string }> = ({ title }) => (
-  <Text style={styles.sectionTitle}>{title}</Text>
-);
+const SectionTitle: React.FC<{ title: string; textStyle?: TextStyle }> = ({
+  title,
+  textStyle,
+}) => <Text style={[styles.sectionTitle, textStyle]}>{title}</Text>;
 
-const Divider: React.FC = () => <View style={styles.divider} />;
+const Divider: React.FC<{ style?: ViewStyle }> = ({ style }) => (
+  <View style={[styles.divider, style]} />
+);
 
 export const BackendReportView: React.FC<BackendReportViewProps> = ({
   report,
   header,
   settings,
+  reportType,
 }) => {
+  const logoUrl = useReceiptLogoUri(settings, null);
+  const {
+    customization,
+    bodyText,
+    companyNameStyle,
+    companyDetailsStyle,
+    dividerOverride,
+    logoWidth,
+    logoHeight,
+  } = useReceiptStyleScale(settings);
+  const showLogo = Boolean(logoUrl && customization.showLogo);
+
   const currency = resolveCurrencyCode(settings?.company?.currency);
   const now = new Date();
   const printedAt = `${now.toLocaleDateString()} ${now.toLocaleTimeString([], {
@@ -48,7 +70,8 @@ export const BackendReportView: React.FC<BackendReportViewProps> = ({
     minute: '2-digit',
   })}`;
 
-  const tableColumns = report.columns.map(col => ({
+  const visibleColumns = filterReportColumns(reportType, report.columns);
+  const tableColumns = visibleColumns.map(col => ({
     key: col.key,
     label: col.label,
     flex: 1,
@@ -64,27 +87,27 @@ export const BackendReportView: React.FC<BackendReportViewProps> = ({
       const isReturn = sale.transaction_label === 'Return';
       return (
         <View key={sale.id} style={styles.rowCard}>
-          <HStack justifyContent="space-between" alignItems="flex-start">
-            <VStack flex={1} pr="$2">
-              <Text style={styles.rowTitle}>{sale.sales_id ?? `#${sale.id}`}</Text>
-              <Text style={styles.rowSub}>{sale.customer}</Text>
-              <Text style={styles.rowMeta}>
-                {[sale.date, sale.payment_method, sale.location].filter(Boolean).join(' · ')}
-              </Text>
-            </VStack>
-            <VStack alignItems="flex-end">
-              <Text style={[styles.rowAmount, isReturn && { color: colors.error }]}>
-                {formatCurrency(sale.net_amount, currency)}
-              </Text>
-              <Text style={[styles.rowBadge, isReturn && styles.rowBadgeReturn]}>
-                {sale.transaction_label}
-              </Text>
-            </VStack>
+          {/* Sales No -> Customer Name -> Payment Type -> Net, in that order. */}
+          <Text style={[styles.rowTitle, bodyText(13)]}>{sale.sales_id ?? `#${sale.id}`}</Text>
+          <Text style={[styles.rowSub, bodyText(12)]}>{sale.customer}</Text>
+          <Text style={[styles.rowMeta, bodyText(11)]}>{sale.payment_method || '—'}</Text>
+          <HStack justifyContent="space-between" alignItems="center" mt="$1">
+            <Text style={[styles.rowAmount, bodyText(13), isReturn && { color: colors.error }]}>
+              {formatCurrency(sale.net_amount, currency)}
+            </Text>
+            <Text style={[styles.rowBadge, bodyText(10), isReturn && styles.rowBadgeReturn]}>
+              {sale.transaction_label}
+            </Text>
           </HStack>
+          {sale.date || sale.location ? (
+            <Text style={[styles.rowMeta, bodyText(11)]}>
+              {[sale.date, sale.location].filter(Boolean).join(' · ')}
+            </Text>
+          ) : null}
           {sale.items.length ? (
             <VStack mt="$2" space="xs">
               {sale.items.map((item, idx) => (
-                <Text key={`${sale.id}-${idx}`} style={styles.itemLine}>
+                <Text key={`${sale.id}-${idx}`} style={[styles.itemLine, bodyText(11)]}>
                   {item.qty} × {item.description ?? item.item_number} ·{' '}
                   {formatCurrency(item.amount, currency)}
                 </Text>
@@ -97,7 +120,7 @@ export const BackendReportView: React.FC<BackendReportViewProps> = ({
   };
 
   const renderTable = () => {
-    if (!report.columns.length) {
+    if (!visibleColumns.length) {
       return null;
     }
 
@@ -110,8 +133,8 @@ export const BackendReportView: React.FC<BackendReportViewProps> = ({
             key={`row-${idx}`}
             columns={tableColumns}
             isLast={idx === report.rows.length - 1}
-            cells={report.columns.map(col => (
-              <Text key={col.key} style={styles.tableCell} numberOfLines={2}>
+            cells={visibleColumns.map(col => (
+              <Text key={col.key} style={[styles.tableCell, bodyText(11)]} numberOfLines={2}>
                 {formatCell(row[col.key], currency)}
               </Text>
             ))}
@@ -123,23 +146,41 @@ export const BackendReportView: React.FC<BackendReportViewProps> = ({
 
   return (
     <View style={styles.paper}>
-      <Text style={styles.companyName}>{header.company_name ?? 'Business Report'}</Text>
-      {header.address ? <Text style={styles.mutedCenter}>{header.address}</Text> : null}
-      {header.phone ? <Text style={styles.mutedCenter}>Tel: {header.phone}</Text> : null}
-      {header.email ? <Text style={styles.mutedCenter}>{header.email}</Text> : null}
-      {header.tax_id ? <Text style={styles.mutedCenter}>Tax ID: {header.tax_id}</Text> : null}
+      {showLogo && logoUrl ? (
+        <Image
+          source={{ uri: logoUrl }}
+          style={[styles.logo, { width: logoWidth, height: logoHeight }]}
+          resizeMode="contain"
+        />
+      ) : null}
 
-      <Divider />
-      <Text style={styles.reportTitle}>{report.title}</Text>
-      <Text style={styles.mutedCenter}>
+      <Text style={[styles.companyName, companyNameStyle]}>
+        {header.company_name ?? 'Business Report'}
+      </Text>
+      {header.address ? (
+        <Text style={[styles.mutedCenter, companyDetailsStyle]}>{header.address}</Text>
+      ) : null}
+      {header.phone ? (
+        <Text style={[styles.mutedCenter, companyDetailsStyle]}>Tel: {header.phone}</Text>
+      ) : null}
+      {header.email ? (
+        <Text style={[styles.mutedCenter, companyDetailsStyle]}>{header.email}</Text>
+      ) : null}
+      {header.tax_id ? (
+        <Text style={[styles.mutedCenter, companyDetailsStyle]}>Tax ID: {header.tax_id}</Text>
+      ) : null}
+
+      <Divider style={dividerOverride} />
+      <Text style={[styles.reportTitle, bodyText(14)]}>{report.title}</Text>
+      <Text style={[styles.mutedCenter, bodyText(12)]}>
         {report.filters.date_from} — {report.filters.date_to}
       </Text>
-      <Text style={styles.mutedCenter}>{report.filters.branch_name}</Text>
+      <Text style={[styles.mutedCenter, bodyText(12)]}>{report.filters.branch_name}</Text>
       {report.filters.item_name ? (
-        <Text style={styles.mutedCenter}>Item: {report.filters.item_name}</Text>
+        <Text style={[styles.mutedCenter, bodyText(12)]}>Item: {report.filters.item_name}</Text>
       ) : null}
       {report.generated_at ? (
-        <Text style={styles.mutedCenter}>
+        <Text style={[styles.mutedCenter, bodyText(12)]}>
           Generated:{' '}
           {parseBackendTimestamp(report.generated_at).toLocaleString(undefined, {
             dateStyle: 'medium',
@@ -150,27 +191,29 @@ export const BackendReportView: React.FC<BackendReportViewProps> = ({
 
       <View style={styles.body}>
         {report.note ? (
-          <Text style={styles.noteText}>{report.note}</Text>
+          <Text style={[styles.noteText, bodyText(12)]}>{report.note}</Text>
         ) : null}
 
         {report.summary.length ? (
           <VStack space="sm" mb="$3">
-            <SectionTitle title="Summary" />
+            <SectionTitle title="Summary" textStyle={bodyText(11)} />
             {report.summary.map(item => (
               <HStack key={item.label} justifyContent="space-between" py="$0.5">
-                <Text style={styles.metaLabel}>{item.label}</Text>
-                <Text style={styles.metaValue}>{formatCell(item.value, currency)}</Text>
+                <Text style={[styles.metaLabel, bodyText(12)]}>{item.label}</Text>
+                <Text style={[styles.metaValue, bodyText(12)]}>
+                  {formatCell(item.value, currency)}
+                </Text>
               </HStack>
             ))}
-            <Divider />
+            <Divider style={dividerOverride} />
           </VStack>
         ) : null}
 
         {report.layout === 'sales_summary' ? renderSalesSummary() : renderTable()}
       </View>
 
-      <Divider />
-      <Text style={styles.footerNote}>Printed: {printedAt}</Text>
+      <Divider style={dividerOverride} />
+      <Text style={[styles.footerNote, bodyText(10)]}>Printed: {printedAt}</Text>
     </View>
   );
 };
@@ -185,6 +228,12 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     alignSelf: 'center',
     width: '100%',
+  },
+  logo: {
+    width: 120,
+    height: 56,
+    alignSelf: 'center',
+    marginBottom: 8,
   },
   companyName: {
     fontSize: 18,

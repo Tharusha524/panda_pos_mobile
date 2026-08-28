@@ -14,6 +14,7 @@ import { cardStyles, colors, radius, typography } from '@/theme';
 
 export interface RecentTransaction {
   id: string;
+  rawId: number;
   type: 'sale' | 'return' | 'purchase' | 'payment' | 'expense';
   title: string;
   reference?: string;

@@ -17,13 +17,29 @@ import { usePosSettings } from '@/context/PosSettingsContext';
 import { ReportFilterBar } from '@/components/reports/ReportFilterBar';
 import { useSystemReport } from '@/hooks/useSystemReport';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
+import { reportService } from '@/services/api/reportService';
 import { navigateToPrinterSetup } from '@/navigation/navigationRef';
 import { getReportMeta } from '@/types/reports';
 import type { ReportsStackParamList } from '@/navigation/types';
+import type { BackendReportData } from '@/types/backendReports';
 import { colors } from '@/theme';
-import { defaultReportFilters, formatReportDateRangeLabel } from '@/utils/reportDateFilters';
+import {
+  defaultReportFilters,
+  formatReportDateRangeLabel,
+} from '@/utils/reportDateFilters';
 import type { ReportFilterParams } from '@/types/reportFilters';
-import { buildPrintHeaderFromSettings as buildHeader } from '@/utils/receiptPrintCustomization';
+import { captureReceiptBase64 } from '@/utils/receiptImageShare';
+import { supportsDateFilter, supportsItemFilter } from '@/constants/reportFilterCapabilities';
+import { downloadDailySalesExcel, shareDailySalesExcel } from '@/utils/dailySalesFile';
+import { downloadReportTableExcel, shareReportTableExcel } from '@/utils/reportTableFile';
+import {
+  downloadCustomerSettlementExcel,
+  shareCustomerSettlementExcel,
+} from '@/utils/customerSettlementFile';
+import {
+  buildPrintHeaderFromSettings as buildHeader,
+  getReceiptPrintCustomization,
+} from '@/utils/receiptPrintCustomization';
 
 type Route = RouteProp<ReportsStackParamList, 'ReportView'>;
 
@@ -46,6 +62,142 @@ export const ReportViewScreen: React.FC = () => {
 
   const meta = getReportMeta(params.type);
   const header = useMemo(() => buildHeader(settings), [settings]);
+
+  // Daily Business Summary's dashboard API is fixed to "today" and ignores
+  // the date filter entirely (see useSystemReport) — so instead of showing
+  // that live dashboard, this report type always fetches sales-summary for
+  // whatever range is picked on the filter bar as a side channel, and shows
+  // that instead. Same range-picker UX as the other report types below.
+  const isDailySummary = params.type === 'daily_summary';
+  // Sales report already has its own date-range picker (ReportFilterBar
+  // below) — it reuses the same Excel pivot as Daily Business Summary, just
+  // fed that range's sales instead of a single day's, no extra UI needed.
+  const isSalesReport = params.type === 'sales_report';
+  // Return report also uses the item-level pivot — sales-summary already
+  // returns both sales and returns together (row.transaction_label tells
+  // them apart), so it's filtered down to Return rows only after fetching.
+  const isReturnReport = params.type === 'return_report';
+  const pivotExcelSupported = isDailySummary || isSalesReport || isReturnReport;
+  // Customer Settlement and Credit sales are already a flat column/row
+  // table (see reportPayload on the backend) — exported as-is via the
+  // generic table exporter instead of the item-level sales pivot above.
+  const isCustomerSettlement = params.type === 'customer_settlement';
+  const isCreditSales = params.type === 'credit_sales';
+  const genericExcelSupported = isCustomerSettlement || isCreditSales;
+  const excelExportSupported = pivotExcelSupported || genericExcelSupported;
+  const [dailySalesReport, setDailySalesReport] = useState<BackendReportData | null>(null);
+  const [dailySalesLoading, setDailySalesLoading] = useState(false);
+  const [dailySalesError, setDailySalesError] = useState<string | null>(null);
+  const [exportingExcel, setExportingExcel] = useState<'download' | 'share' | null>(null);
+
+  // All of Daily Business Summary / Sales report / Return report / Customer
+  // Settlement / Credit sales now use the normal filter bar's date range.
+  const excelDateFrom = filters.dateFrom;
+  const excelDateTo = filters.dateTo;
+
+  useEffect(() => {
+    if (!pivotExcelSupported) {
+      return;
+    }
+    let cancelled = false;
+    setDailySalesLoading(true);
+    setDailySalesError(null);
+    reportService
+      .fetch('sales-summary', { dateFrom: excelDateFrom, dateTo: excelDateTo })
+      .then(report => {
+        if (!cancelled) {
+          setDailySalesReport(
+            isReturnReport
+              ? { ...report, sales: (report.sales ?? []).filter(s => s.transaction_label === 'Return') }
+              : report,
+          );
+        }
+      })
+      .catch(e => {
+        if (!cancelled) {
+          setDailySalesError(e instanceof Error ? e.message : 'Failed to load sales for this period');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setDailySalesLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pivotExcelSupported, excelDateFrom, excelDateTo]);
+
+  const handleExportExcel = async (action: 'download' | 'share') => {
+    const dateKey = `${excelDateFrom}_to_${excelDateTo}`;
+    const dateLabel = formatReportDateRangeLabel(excelDateFrom, excelDateTo);
+
+    setExportingExcel(action);
+    try {
+      if (genericExcelSupported) {
+        if (!result || result.source !== 'backend') {
+          showError({
+            title: 'Excel export',
+            message: 'This report is still loading — try again in a moment.',
+            variant: 'warning',
+          });
+          return;
+        }
+        // Customer Settlement pivots by payment method (route/customer/bill,
+        // one amount column per method, cheque no./bank) — a different
+        // layout from the plain flat-table export the other reports use.
+        if (isCustomerSettlement) {
+          if (action === 'download') {
+            const message = await downloadCustomerSettlementExcel(result.report, dateKey, dateLabel);
+            showError({ title: 'Excel saved', message, variant: 'info', confirmLabel: 'OK' });
+          } else {
+            await shareCustomerSettlementExcel(result.report, dateKey, dateLabel);
+          }
+          return;
+        }
+        if (action === 'download') {
+          const message = await downloadReportTableExcel(result.report, dateKey, dateLabel);
+          showError({ title: 'Excel saved', message, variant: 'info', confirmLabel: 'OK' });
+        } else {
+          await shareReportTableExcel(result.report, dateKey, dateLabel);
+        }
+        return;
+      }
+
+      if (!dailySalesReport) {
+        showError({
+          title: 'Excel export',
+          message: 'Sales for this period are still loading — try again in a moment.',
+          variant: 'warning',
+        });
+        return;
+      }
+      const title = isSalesReport
+        ? 'Sales Report'
+        : isReturnReport
+          ? 'Return Report'
+          : 'Daily Sale Report';
+      if (action === 'download') {
+        const message = await downloadDailySalesExcel(
+          dailySalesReport.sales ?? [],
+          dateKey,
+          dateLabel,
+          title,
+        );
+        showError({ title: 'Excel saved', message, variant: 'info', confirmLabel: 'OK' });
+      } else {
+        await shareDailySalesExcel(dailySalesReport.sales ?? [], dateKey, dateLabel, title);
+      }
+    } catch (e) {
+      showError({
+        title: action === 'download' ? 'Download failed' : 'Share failed',
+        message: e instanceof Error ? e.message : 'Could not export the Excel report',
+        variant: 'warning',
+      });
+    } finally {
+      setExportingExcel(null);
+    }
+  };
 
   useEffect(() => {
     if (error && error !== lastError.current) {
@@ -76,14 +228,31 @@ export const ReportViewScreen: React.FC = () => {
     }
     setPrinting(true);
     try {
+      let capturedImageBase64: string | undefined;
+      try {
+        const customization = await getReceiptPrintCustomization(settings);
+        if (customization.printAsImage) {
+          capturedImageBase64 = await captureReceiptBase64(reportShotRef);
+        }
+      } catch {
+        // Couldn't read the setting or capture the preview — fall back to the
+        // normal text report below instead of blocking the print entirely.
+      }
       if (result.source === 'dashboard') {
-        await bluetoothPrintService.printReport(result.report, currency, settings);
+        await bluetoothPrintService.printReport(
+          result.report,
+          currency,
+          settings,
+          capturedImageBase64,
+        );
       } else {
         await bluetoothPrintService.printBackendReport(
           result.report,
           header,
           currency,
           settings,
+          capturedImageBase64,
+          params.type,
         );
       }
     } catch (e) {
@@ -101,6 +270,9 @@ export const ReportViewScreen: React.FC = () => {
   };
 
   const subtitle = useMemo(() => {
+    if (isDailySummary) {
+      return formatReportDateRangeLabel(filters.dateFrom, filters.dateTo);
+    }
     if (result?.source === 'dashboard') {
       return result.report.subtitle ?? formatReportDateRangeLabel(filters.dateFrom, filters.dateTo);
     }
@@ -113,7 +285,14 @@ export const ReportViewScreen: React.FC = () => {
       return `${result.report.filters.date_from} — ${result.report.filters.date_to}${itemSuffix}`;
     }
     return meta?.subtitle;
-  }, [filters.dateFrom, filters.dateTo, filters.itemLabel, meta?.subtitle, result]);
+  }, [
+    filters.dateFrom,
+    filters.dateTo,
+    filters.itemLabel,
+    isDailySummary,
+    meta?.subtitle,
+    result,
+  ]);
 
   const scrollBottomPad = Math.max(insets.bottom, 16) + 88;
 
@@ -136,9 +315,54 @@ export const ReportViewScreen: React.FC = () => {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} />
         }>
-        <ReportFilterBar filters={filters} onChange={setFilters} />
+        <ReportFilterBar
+          filters={filters}
+          onChange={setFilters}
+          showDateFilter={supportsDateFilter(params.type)}
+          showItemFilter={supportsItemFilter(params.type)}
+        />
 
-        {result ? (
+        {isDailySummary ? (
+          <>
+            {dailySalesLoading && !dailySalesReport ? (
+              <LoadingOverlay message="Loading day's sales…" />
+            ) : null}
+            {dailySalesReport ? (
+              <View style={{ width: '100%', maxWidth: 400 }} collapsable={false}>
+                <BackendReportView
+                  report={dailySalesReport}
+                  header={header}
+                  settings={settings}
+                  reportType={params.type}
+                />
+              </View>
+            ) : !dailySalesLoading && dailySalesError ? (
+              <Box w="100%" maxWidth={400} px="$4" py="$8">
+                <VStack alignItems="center" space="md">
+                  <Text fontSize="$sm" color={colors.textSecondary} textAlign="center">
+                    {dailySalesError}
+                  </Text>
+                </VStack>
+              </Box>
+            ) : null}
+            <Box w="100%" maxWidth={400} gap="$2" mt="$4" mb="$2">
+              <PrimaryButton
+                label={exportingExcel === 'download' ? 'Saving…' : 'Download Excel'}
+                variant="outline"
+                onPress={() => handleExportExcel('download')}
+                loading={exportingExcel === 'download'}
+                disabled={exportingExcel != null}
+              />
+              <PrimaryButton
+                label={exportingExcel === 'share' ? 'Sharing…' : 'Share Excel'}
+                variant="outline"
+                onPress={() => handleExportExcel('share')}
+                loading={exportingExcel === 'share'}
+                disabled={exportingExcel != null}
+              />
+            </Box>
+          </>
+        ) : result ? (
           <>
             <View style={{ width: '100%', maxWidth: 400 }} collapsable={false}>
               <ViewShot
@@ -152,6 +376,7 @@ export const ReportViewScreen: React.FC = () => {
                     report={result.report}
                     header={header}
                     settings={settings}
+                    reportType={params.type}
                   />
                 )}
               </ViewShot>
@@ -163,6 +388,24 @@ export const ReportViewScreen: React.FC = () => {
                 loading={printing}
                 disabled={!result}
               />
+              {excelExportSupported ? (
+                <>
+                  <PrimaryButton
+                    label={exportingExcel === 'download' ? 'Saving…' : 'Download Excel'}
+                    variant="outline"
+                    onPress={() => handleExportExcel('download')}
+                    loading={exportingExcel === 'download'}
+                    disabled={exportingExcel != null}
+                  />
+                  <PrimaryButton
+                    label={exportingExcel === 'share' ? 'Sharing…' : 'Share Excel'}
+                    variant="outline"
+                    onPress={() => handleExportExcel('share')}
+                    loading={exportingExcel === 'share'}
+                    disabled={exportingExcel != null}
+                  />
+                </>
+              ) : null}
             </Box>
           </>
         ) : !loading && !error ? (

@@ -32,12 +32,15 @@ export interface SalesSummarySale {
   date: string;
   sales_id: string | null;
   customer: string;
+  route?: string | null;
   location: string | null;
   transaction_label: string;
   sub_total: number;
   discount: number;
   net_amount: number;
   payment_method: string | null;
+  cheque_number?: string | null;
+  bank_name?: string | null;
   items: SalesSummaryLineItem[];
 }
 
