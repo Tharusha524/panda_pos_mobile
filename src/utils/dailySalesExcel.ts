@@ -11,10 +11,15 @@ interface PivotItemColumn {
 interface PivotRow {
   customer: string;
   route: string;
-  paymentMethod: string;
-  /** Blank unless this sale was paid by cheque. */
+  /** Keyed by payment method — a plain sale has exactly one entry; a split
+   * sale (payment_method 'Split') has one entry per method it used, so the
+   * row's total is spread across more than one method column. */
+  amountsByMethod: Record<string, number>;
+  /** Blank unless this sale was paid by cheque — "/"-joined if a split sale
+   * used more than one cheque. */
   chequeNumber: string;
-  /** Blank unless a bank was recorded (cheque or bank transfer). */
+  /** Blank unless a bank was recorded (cheque or bank transfer) — "/"-joined
+   * if a split sale recorded more than one. */
   bankName: string;
   total: number;
   /** unitPrice is the per-unit price of the product on this sale, not a summed amount. */
@@ -71,17 +76,45 @@ export function buildDailySalesPivot(sales: SalesSummarySale[]): PivotResult {
         unitPrice: item.unit_price,
       };
     }
-    const paymentMethod = sale.payment_method?.trim() || '—';
-    if (!seenMethods.has(paymentMethod)) {
-      seenMethods.add(paymentMethod);
-      paymentMethods.push(paymentMethod);
+    const splits = sale.payment_splits ?? [];
+    const amountsByMethod: Record<string, number> = {};
+    let chequeNumber = sale.cheque_number?.trim() || '';
+    let bankName = sale.bank_name?.trim() || '';
+
+    if (splits.length > 0) {
+      const chequeNumbers: string[] = [];
+      const bankNames: string[] = [];
+      for (const split of splits) {
+        const method = split.payment_method?.trim() || '—';
+        amountsByMethod[method] = (amountsByMethod[method] ?? 0) + split.amount;
+        if (!seenMethods.has(method)) {
+          seenMethods.add(method);
+          paymentMethods.push(method);
+        }
+        if (split.cheque_number?.trim()) {
+          chequeNumbers.push(split.cheque_number.trim());
+        }
+        if (split.bank_name?.trim()) {
+          bankNames.push(split.bank_name.trim());
+        }
+      }
+      chequeNumber = chequeNumbers.join(' / ');
+      bankName = bankNames.join(' / ');
+    } else {
+      const paymentMethod = sale.payment_method?.trim() || '—';
+      amountsByMethod[paymentMethod] = sale.net_amount;
+      if (!seenMethods.has(paymentMethod)) {
+        seenMethods.add(paymentMethod);
+        paymentMethods.push(paymentMethod);
+      }
     }
+
     return {
       customer: sale.customer || 'Walk-in',
       route: sale.route?.trim() || '',
-      paymentMethod,
-      chequeNumber: sale.cheque_number?.trim() || '',
-      bankName: sale.bank_name?.trim() || '',
+      amountsByMethod,
+      chequeNumber,
+      bankName,
       total: sale.net_amount,
       perItem,
     };
@@ -100,7 +133,9 @@ export function buildDailySalesPivot(sales: SalesSummarySale[]): PivotResult {
   }
   for (const row of rows) {
     totals.grandTotal += row.total;
-    totals.perPaymentMethod[row.paymentMethod] += row.total;
+    for (const [method, amount] of Object.entries(row.amountsByMethod)) {
+      totals.perPaymentMethod[method] = (totals.perPaymentMethod[method] ?? 0) + amount;
+    }
     for (const col of columns) {
       const cell = row.perItem[col.key];
       if (cell) {
@@ -212,7 +247,8 @@ export async function buildDailySalesWorkbookBase64(
       line.push(cell ? cell.qty : '', cell ? cell.unitPrice : '');
     }
     for (const method of methodCols) {
-      line.push(row.paymentMethod === method ? row.total : '');
+      const amount = row.amountsByMethod[method];
+      line.push(amount ? amount : '');
     }
     line.push(row.chequeNumber, row.bankName, row.total);
     ws.addRow(line);

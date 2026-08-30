@@ -132,6 +132,9 @@ export interface SaleRecord {
   /** True once a sale-time cheque has been marked as returned (bounced) —
    * distinct from a product return. See customerService.returnSaleCheque. */
   cheque_returned?: boolean;
+  /** Present only when payment_method is 'Split' — part cash, part cheque,
+   * part credit, etc. on this one sale. */
+  payment_splits?: SalePaymentSplitInput[];
   items: SaleLineItem[];
 }
 
@@ -206,6 +209,9 @@ export interface CreateSalePayload {
   payment_method?: string;
   amount_received?: number;
   bank_id?: number | string | null;
+  /** Freely-typed bank name from checkout — bank_id only fits a real
+   * registered bank; a free-text entry belongs here instead. */
+  bank_name?: string | null;
   cheque_number?: string | null;
   notes?: string | null;
   items: CartLine[];
@@ -213,12 +219,26 @@ export interface CreateSalePayload {
   offer_id?: number | null;
   offer_promo_code?: string | null;
   promo_code?: string | null;
+  payment_splits?: SalePaymentSplitInput[];
+}
+
+/** One row of a split payment — part cash, part cheque, part credit, etc.
+ * on a single sale. Sent instead of the top-level payment method and bank
+ * fields when the cashier splits payment across methods. */
+export interface SalePaymentSplitInput {
+  payment_method: string;
+  amount: number;
+  cheque_number?: string | null;
+  bank_name?: string | null;
 }
 
 export interface SalePaymentDetails {
   payment_method: string;
   amount_received: number;
   bank_id?: number | string | null;
+  /** Freely-typed bank name from checkout — bank_id only fits a real
+   * registered bank; a free-text entry belongs here instead. */
+  bank_name?: string | null;
   cheque_number?: string | null;
   notes?: string | null;
   refund_card_last4?: string | null;
@@ -226,4 +246,5 @@ export interface SalePaymentDetails {
   original_sale_id?: string | null;
   /** Committed cart lines (e.g. after manual qty entry on order screen). */
   cart?: CartLine[];
+  payment_splits?: SalePaymentSplitInput[];
 }

@@ -2046,20 +2046,50 @@ export const usePosSale = () => {
       setError('Select a branch');
       return null;
     }
-    if (
-      /cheque|bank transfer/i.test(payment.payment_method) &&
-      !payment.bank_id
-    ) {
-      setError('Enter the bank name or ID');
-      return null;
-    }
-    if (/^online$/i.test(payment.payment_method) && !payment.notes?.trim()) {
-      setError('Enter a transaction / approval ID for online payment');
-      return null;
-    }
-    if (!isReturn && isCreditPayment(payment.payment_method) && isWalkIn) {
-      setError('Select a customer for credit sales so the balance can be tracked');
-      return null;
+    const paymentSplits = payment.payment_splits ?? [];
+    const hasSplits = paymentSplits.length > 0;
+
+    if (hasSplits) {
+      if (paymentSplits.length < 2) {
+        setError('Add at least two payment methods to split this sale\'s payment');
+        return null;
+      }
+      const splitTotal = round2(paymentSplits.reduce((sum, s) => sum + s.amount, 0));
+      if (Math.abs(splitTotal - checkoutNet) > 0.01) {
+        setError(
+          `Split payment amounts (${splitTotal.toFixed(2)}) must add up to the sale total (${checkoutNet.toFixed(2)})`,
+        );
+        return null;
+      }
+      const missingBank = paymentSplits.find(
+        s => /cheque|bank transfer/i.test(s.payment_method) && !s.bank_name?.trim(),
+      );
+      if (missingBank) {
+        setError(`Enter the bank name for the ${missingBank.payment_method} portion`);
+        return null;
+      }
+      const hasCreditSplit = paymentSplits.some(s => isCreditPayment(s.payment_method));
+      if (!isReturn && hasCreditSplit && isWalkIn) {
+        setError('Select a customer for the credit portion so the balance can be tracked');
+        return null;
+      }
+    } else {
+      if (
+        /cheque|bank transfer/i.test(payment.payment_method) &&
+        !payment.bank_id &&
+        !payment.bank_name?.trim()
+      ) {
+        setError('Enter the bank name');
+        return null;
+      }
+      if (/^online$/i.test(payment.payment_method) && !payment.notes?.trim()) {
+        setError('Enter a transaction / approval ID for online payment');
+        return null;
+      }
+      if (!isReturn && isCreditPayment(payment.payment_method) && isWalkIn) {
+        setError('Select a customer for credit sales so the balance can be tracked');
+        return null;
+      }
     }
     if (
       sourceIsCreditSale &&
@@ -2133,10 +2163,12 @@ export const usePosSale = () => {
         return_sub_total: isExchange ? checkoutReturnSubTotal : undefined,
         discount: checkoutDiscount,
         net_amount: checkoutNet,
-        payment_method: resolvedPaymentMethod,
+        payment_method: hasSplits ? 'Split' : resolvedPaymentMethod,
         amount_received: payment.amount_received,
-        bank_id: payment.bank_id,
-        cheque_number: payment.cheque_number,
+        bank_id: hasSplits ? null : payment.bank_id,
+        bank_name: hasSplits ? null : payment.bank_name,
+        cheque_number: hasSplits ? null : payment.cheque_number,
+        payment_splits: hasSplits ? paymentSplits : undefined,
         notes,
         items: saleLines,
         order_status: 'completed',

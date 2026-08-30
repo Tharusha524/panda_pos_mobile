@@ -23,6 +23,7 @@ import { SaleOrderLineRow } from '@/components/sales/SaleOrderLineRow';
 import { FilterChips } from '@/components/common/FilterChips';
 import { PaymentMethodPicker } from '@/components/sales/PaymentMethodPicker';
 import { PaymentMethodDetails } from '@/components/sales/PaymentMethodDetails';
+import { SplitPaymentEditor, type SplitPaymentRow } from '@/components/sales/SplitPaymentEditor';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSaleContext } from '@/context/PosSaleContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
@@ -107,6 +108,10 @@ export const SaleOrderScreen: React.FC = () => {
   const banks: BankAccount[] = [];
   const [bankId, setBankId] = useState<number | string | null>('');
   const [chequeNumber, setChequeNumber] = useState('');
+  // Split payment (part cash, part cheque, part credit, etc. on one sale) —
+  // plain-sale checkout only, not returns/exchanges/credit-account refunds.
+  const [splitPayment, setSplitPayment] = useState(false);
+  const [splitRows, setSplitRows] = useState<SplitPaymentRow[]>([]);
   const [originalSaleId, setOriginalSaleId] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [paymentCardLast4, setPaymentCardLast4] = useState('');
@@ -215,6 +220,9 @@ export const SaleOrderScreen: React.FC = () => {
 
   const isRefundDue = pos.isExchange && previewOrderTotal < 0;
   const needsRefundCardUi = pos.isReturn || isRefundDue;
+  // Plain-sale checkout only — a return/exchange/credit-account refund
+  // always settles through one path, no method-splitting there.
+  const canSplitPayment = !pos.isReturn && !pos.isExchange && !pos.returnFromCreditSale;
 
   const buildCheckoutCart = useCallback((): CartLine[] => {
     return pos.cart.map(line => {
@@ -570,37 +578,84 @@ export const SaleOrderScreen: React.FC = () => {
       return;
     }
 
-    if (!pos.isReturn && isCreditPayment(paymentMethod) && isWalkInCustomer(pos.customer)) {
-      showError({
-        title: 'Credit sale',
-        message: 'Select a registered customer to charge this sale to their account.',
-        variant: 'warning',
-      });
-      return;
-    }
+    const isUsingSplitPayment = canSplitPayment && splitPayment;
+    const validSplitRows = splitRows.filter(
+      r => r.paymentMethod && (parseFloat(r.amount.replace(/,/g, '')) || 0) > 0,
+    );
 
-    if (
-      !pos.isReturn &&
-      needsPaymentReference(paymentMethod) &&
-      !paymentReference.trim()
-    ) {
-      showError({
-        title: isOnlinePayment(paymentMethod) ? 'Online payment' : 'Bank transfer',
-        message: isOnlinePayment(paymentMethod)
-          ? 'Enter the transaction or approval ID.'
-          : 'Enter the transfer reference number.',
-        variant: 'warning',
-      });
-      return;
-    }
+    if (isUsingSplitPayment) {
+      if (validSplitRows.length < 2) {
+        showError({
+          title: 'Split payment',
+          message: 'Add at least two payment methods with an amount.',
+          variant: 'warning',
+        });
+        return;
+      }
+      const splitTotal = round2(
+        validSplitRows.reduce((sum, r) => sum + (parseFloat(r.amount.replace(/,/g, '')) || 0), 0),
+      );
+      if (Math.abs(splitTotal - previewOrderTotal) > 0.01) {
+        showError({
+          title: 'Split payment',
+          message: `Split amounts (${formatCurrency(splitTotal, currency)}) must add up to the sale total (${formatCurrency(previewOrderTotal, currency)}).`,
+          variant: 'warning',
+        });
+        return;
+      }
+      const missingBank = validSplitRows.find(
+        r => /cheque|bank transfer/i.test(r.paymentMethod) && !r.bankName.trim(),
+      );
+      if (missingBank) {
+        showError({
+          title: 'Bank',
+          message: `Enter the bank name for the ${missingBank.paymentMethod} portion.`,
+          variant: 'warning',
+        });
+        return;
+      }
+      const hasCreditSplit = validSplitRows.some(r => isCreditPayment(r.paymentMethod));
+      if (hasCreditSplit && isWalkInCustomer(pos.customer)) {
+        showError({
+          title: 'Credit sale',
+          message: 'Select a registered customer for the credit portion so the balance can be tracked.',
+          variant: 'warning',
+        });
+        return;
+      }
+    } else {
+      if (!pos.isReturn && isCreditPayment(paymentMethod) && isWalkInCustomer(pos.customer)) {
+        showError({
+          title: 'Credit sale',
+          message: 'Select a registered customer to charge this sale to their account.',
+          variant: 'warning',
+        });
+        return;
+      }
 
-    if (!pos.isReturn && needsBank(paymentMethod) && !String(bankId ?? '').trim()) {
-      showError({
-        title: 'Bank',
-        message: 'Enter the bank name or ID.',
-        variant: 'warning',
-      });
-      return;
+      if (
+        !pos.isReturn &&
+        needsPaymentReference(paymentMethod) &&
+        !paymentReference.trim()
+      ) {
+        showError({
+          title: isOnlinePayment(paymentMethod) ? 'Online payment' : 'Bank transfer',
+          message: isOnlinePayment(paymentMethod)
+            ? 'Enter the transaction or approval ID.'
+            : 'Enter the transfer reference number.',
+          variant: 'warning',
+        });
+        return;
+      }
+
+      if (!pos.isReturn && needsBank(paymentMethod) && !String(bankId ?? '').trim()) {
+        showError({
+          title: 'Bank',
+          message: 'Enter the bank name or ID.',
+          variant: 'warning',
+        });
+        return;
+      }
     }
 
     const holdPin =
@@ -665,7 +720,7 @@ export const SaleOrderScreen: React.FC = () => {
         discount_percent: pos.discountPercent,
         sale_date: new Date().toISOString(),
         location: pos.location,
-        payment_method: paymentMethod,
+        payment_method: isUsingSplitPayment ? 'Split' : paymentMethod,
         customer_name: customerName,
         customer_code: pos.customer?.customer_code ?? null,
         customer_contact_no: pos.customer?.contact_no ?? null,
@@ -704,11 +759,25 @@ export const SaleOrderScreen: React.FC = () => {
         onEdit: () => navigation.goBack(),
         onConfirm: async () => {
           const result = await pos.completeSale({
-            payment_method: paymentMethod,
+            payment_method: isUsingSplitPayment ? 'Split' : paymentMethod,
             amount_received: received,
-            bank_id: needsBank(paymentMethod) ? bankId : null,
-            cheque_number: /cheque/i.test(paymentMethod)
+            // This screen's bank field is free text (bankAsFreeText below),
+            // not a picker over real registered banks — belongs in
+            // bank_name, not the numeric bank_id.
+            bank_id: null,
+            bank_name: !isUsingSplitPayment && needsBank(paymentMethod)
+              ? String(bankId ?? '').trim() || null
+              : null,
+            cheque_number: !isUsingSplitPayment && /cheque/i.test(paymentMethod)
               ? chequeNumber.trim() || undefined
+              : undefined,
+            payment_splits: isUsingSplitPayment
+              ? validSplitRows.map(r => ({
+                  payment_method: r.paymentMethod,
+                  amount: parseFloat(r.amount.replace(/,/g, '')) || 0,
+                  cheque_number: r.chequeNumber.trim() || null,
+                  bank_name: r.bankName.trim() || null,
+                }))
               : undefined,
             notes: paymentNotes,
             refund_card_last4: needsRefundCard ? refundDigits : null,
@@ -1221,40 +1290,77 @@ export const SaleOrderScreen: React.FC = () => {
             <ChevronRight size={16} color={colors.primaryLight} />
           </Pressable>
 
-          <PaymentMethodPicker
-            methods={pos.paymentMethods}
-            selected={paymentMethod}
-            lockedMethod={
-              pos.returnFromCreditSale
-                ? resolveCreditPaymentMethod(pos.paymentMethods)
-                : null
-            }
-            title={pos.returnFromCreditSale ? 'Refund to account' : 'Payment method'}
-            onSelect={method => {
-              setPaymentMethod(method);
-              pos.setPaymentMethod(method);
-            }}
-          />
+          {canSplitPayment ? (
+            <Pressable
+              onPress={() => setSplitPayment(v => !v)}
+              flexDirection="row"
+              alignItems="center"
+              justifyContent="space-between"
+              mb="$3"
+              accessibilityRole="button">
+              <Text size="sm" fontWeight="$semibold" color={colors.text}>
+                Split payment across methods
+              </Text>
+              <Box
+                px="$3"
+                py="$1"
+                borderRadius="$full"
+                borderWidth={1}
+                borderColor={splitPayment ? colors.primary : colors.border}
+                bg={splitPayment ? colors.primary : colors.white}>
+                <Text size="xs" fontWeight="$bold" color={splitPayment ? colors.textOnPrimary : colors.textSecondary}>
+                  {splitPayment ? 'On' : 'Off'}
+                </Text>
+              </Box>
+            </Pressable>
+          ) : null}
 
-          <PaymentMethodDetails
-            paymentMethod={paymentMethod}
-            isReturn={pos.isReturn || isRefundDue}
-            netAmount={isRefundDue ? Math.abs(previewOrderTotal) : previewOrderTotal}
-            currency={currency}
-            amountReceived={amountReceived}
-            onAmountReceivedChange={setAmountReceived}
-            banks={banks}
-            bankId={bankId}
-            onBankIdChange={setBankId}
-            bankAsFreeText
-            chequeNumber={chequeNumber}
-            onChequeNumberChange={setChequeNumber}
-            paymentReference={paymentReference}
-            onPaymentReferenceChange={setPaymentReference}
-            paymentCardLast4={paymentCardLast4}
-            onPaymentCardLast4Change={setPaymentCardLast4}
-            customer={pos.customer}
-          />
+          {splitPayment && canSplitPayment ? (
+            <SplitPaymentEditor
+              methods={pos.paymentMethods}
+              rows={splitRows}
+              onChange={setSplitRows}
+              total={previewOrderTotal}
+              currency={currency}
+            />
+          ) : (
+            <>
+              <PaymentMethodPicker
+                methods={pos.paymentMethods}
+                selected={paymentMethod}
+                lockedMethod={
+                  pos.returnFromCreditSale
+                    ? resolveCreditPaymentMethod(pos.paymentMethods)
+                    : null
+                }
+                title={pos.returnFromCreditSale ? 'Refund to account' : 'Payment method'}
+                onSelect={method => {
+                  setPaymentMethod(method);
+                  pos.setPaymentMethod(method);
+                }}
+              />
+
+              <PaymentMethodDetails
+                paymentMethod={paymentMethod}
+                isReturn={pos.isReturn || isRefundDue}
+                netAmount={isRefundDue ? Math.abs(previewOrderTotal) : previewOrderTotal}
+                currency={currency}
+                amountReceived={amountReceived}
+                onAmountReceivedChange={setAmountReceived}
+                banks={banks}
+                bankId={bankId}
+                onBankIdChange={setBankId}
+                bankAsFreeText
+                chequeNumber={chequeNumber}
+                onChequeNumberChange={setChequeNumber}
+                paymentReference={paymentReference}
+                onPaymentReferenceChange={setPaymentReference}
+                paymentCardLast4={paymentCardLast4}
+                onPaymentCardLast4Change={setPaymentCardLast4}
+                customer={pos.customer}
+              />
+            </>
+          )}
         </SmoothScrollView>
 
         <OrderCheckoutFooter

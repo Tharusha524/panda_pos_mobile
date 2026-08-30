@@ -27,6 +27,13 @@ export interface SalesSummaryLineItem {
   amount: number;
 }
 
+export interface SalesSummaryPaymentSplit {
+  payment_method: string;
+  amount: number;
+  cheque_number?: string | null;
+  bank_name?: string | null;
+}
+
 export interface SalesSummarySale {
   id: number;
   date: string;
@@ -41,6 +48,9 @@ export interface SalesSummarySale {
   payment_method: string | null;
   cheque_number?: string | null;
   bank_name?: string | null;
+  /** Present only when payment_method is 'Split' — part cash, part cheque,
+   * part credit, etc. on this one sale. */
+  payment_splits?: SalesSummaryPaymentSplit[];
   items: SalesSummaryLineItem[];
 }
 
