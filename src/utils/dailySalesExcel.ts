@@ -49,11 +49,18 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
 };
 
 /** Pivots a day's sales into: one row per sale (as printed on that bill), one
- * Pcs/Unit Price column pair per distinct item sold that day. Return
- * transactions are excluded — this mirrors the paper "Daily Sale Report"
- * sheet, a positive-sales view only. */
-export function buildDailySalesPivot(sales: SalesSummarySale[]): PivotResult {
-  const saleRows = sales.filter(s => s.transaction_label !== 'Return');
+ * Pcs/Unit Price column pair per distinct item sold that day. By default,
+ * Return transactions are excluded — this mirrors the paper "Daily Sale
+ * Report" sheet, a positive-sales view only. Pass `includeReturns: true` for
+ * the Return Report export, where the caller has already pre-filtered the
+ * list down to only Return rows and excluding them again would zero it out. */
+export function buildDailySalesPivot(
+  sales: SalesSummarySale[],
+  includeReturns: boolean = false,
+): PivotResult {
+  const saleRows = includeReturns
+    ? sales
+    : sales.filter(s => s.transaction_label !== 'Return');
 
   const columns: PivotItemColumn[] = [];
   const seenColumns = new Set<string>();
@@ -155,8 +162,9 @@ export async function buildDailySalesWorkbookBase64(
   sales: SalesSummarySale[],
   dateLabel: string,
   title: string = 'Daily Sale Report',
+  includeReturns: boolean = false,
 ): Promise<{ base64: string; isEmpty: boolean }> {
-  const { columns, paymentMethods, rows, totals } = buildDailySalesPivot(sales);
+  const { columns, paymentMethods, rows, totals } = buildDailySalesPivot(sales, includeReturns);
   // Falls back to one placeholder column so the "Payment Method" header
   // still has something to merge across on an empty (no-sales) sheet.
   const methodCols = paymentMethods.length > 0 ? paymentMethods : ['Payment Method'];
@@ -178,6 +186,11 @@ export async function buildDailySalesWorkbookBase64(
   // "Bank Name" in Excel.
   ws.getColumn(1).width = 14;
   ws.getColumn(2).width = 26;
+  // Item columns stay narrow on purpose — widening every one to fit its
+  // full name on one line made the whole sheet unreasonably wide. Instead
+  // the item name header wraps onto multiple lines within this narrow
+  // width (see wrapText + the taller header row below), which keeps the
+  // sheet compact while still showing the full name clearly.
   columns.forEach((_, idx) => {
     ws.getColumn(3 + idx * 2).width = 8;
     ws.getColumn(4 + idx * 2).width = 10;
@@ -218,6 +231,10 @@ export async function buildDailySalesWorkbookBase64(
 
   const headerRowIndex1 = ws.addRow(headerRow1).number;
   const headerRowIndex2 = ws.addRow(headerRow2).number;
+  // Tall enough for a long item name (e.g. "SHEET 220 TOILET ROLLE") to
+  // wrap onto several lines within its narrow column and still read
+  // clearly, instead of Excel's default single-line height clipping it.
+  ws.getRow(headerRowIndex1).height = 60;
 
   columns.forEach((_, idx) => {
     const startCol = 3 + idx * 2;
@@ -234,7 +251,10 @@ export async function buildDailySalesWorkbookBase64(
       const cell = ws.getCell(r, c);
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_FILL } };
       cell.font = { bold: true };
-      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      // wrapText lets a long item name break across lines (at whole word
+      // boundaries) within its narrow column instead of being clipped or
+      // spilling over neighboring cells.
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
       cell.border = THIN_BORDER;
     }
   }

@@ -201,6 +201,33 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
           value={sale.payment_method ?? 'Cash'}
           textStyle={bodyText(12)}
         />
+        {sale.payment_method !== 'Split' && sale.bank_name?.trim() ? (
+          <MetaRow label="Bank" value={sale.bank_name.trim()} textStyle={bodyText(12)} />
+        ) : null}
+        {sale.payment_method !== 'Split' && sale.cheque_number?.trim() ? (
+          <MetaRow label="Cheque #" value={sale.cheque_number.trim()} textStyle={bodyText(12)} />
+        ) : null}
+        {sale.payment_method === 'Split' && sale.payment_splits && sale.payment_splits.length > 0
+          ? sale.payment_splits.map((split, idx) => (
+              <React.Fragment key={`${split.payment_method}-${idx}`}>
+                <MetaRow
+                  label={
+                    split.payment_method +
+                    (split.cheque_number?.trim() ? ` #${split.cheque_number.trim()}` : '')
+                  }
+                  value={formatCurrency(split.amount, currency)}
+                  textStyle={bodyText(12)}
+                />
+                {split.bank_name?.trim() ? (
+                  <MetaRow
+                    label="Bank"
+                    value={split.bank_name.trim()}
+                    textStyle={bodyText(12)}
+                  />
+                ) : null}
+              </React.Fragment>
+            ))
+          : null}
       </View>
 
       {customerInfoRows.length > 0 ? (
@@ -332,14 +359,15 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
   );
 };
 
-const MetaRow: React.FC<{ label: string; value: string; textStyle?: TextStyle }> = ({
-  label,
-  value,
-  textStyle,
-}) => (
+const MetaRow: React.FC<{
+  label: string;
+  value: string;
+  textStyle?: TextStyle;
+  valueStyle?: TextStyle;
+}> = ({ label, value, textStyle, valueStyle }) => (
   <HStack justifyContent="space-between" py="$0.5">
-    <Text style={[styles.metaLabel, textStyle]}>{label}</Text>
-    <Text style={[styles.metaValue, textStyle]}>{value}</Text>
+    <Text style={[styles.metaLabel, textStyle, valueStyle]}>{label}</Text>
+    <Text style={[styles.metaValue, textStyle, valueStyle]}>{value}</Text>
   </HStack>
 );
 

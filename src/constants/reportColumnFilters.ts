@@ -16,9 +16,9 @@ const REPORT_COLUMN_ALLOWLIST: Partial<Record<SystemReportType, string[]>> = {
   // Customer report (backend key "customer-list"): Name, Route/Branch,
   // Balance, Phone — dropping Code, Email.
   customer_report: ['name', 'location', 'balance', 'phone'],
-  // Item report (backend key "item-list"): Item code, Description, Category,
-  // Quantity, Sell price — dropping Branch, Cost, Active.
-  item_report: ['item_number', 'description', 'category', 'qty', 'selling_price'],
+  // Item report (backend key "item-list"): Description, Category, Quantity,
+  // Sell price — dropping Item #, Branch, Cost, Active.
+  item_report: ['description', 'category', 'qty', 'selling_price'],
 };
 
 /** Filters (and reorders) report columns down to the curated allowlist for the

@@ -13,6 +13,9 @@ export interface CreatePurchasePayload {
   amount: number;
   payment_method?: string;
   bank_id?: number | string | null;
+  /** Freely-typed bank name from the purchase screen — bank_id only fits a
+   * real registered bank; a free-text entry belongs here instead. */
+  bank_name?: string | null;
   cheque_number?: string | null;
   notes?: string | null;
   items: {

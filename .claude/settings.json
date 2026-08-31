@@ -12,7 +12,18 @@
       "Bash(mkdir -p /e/npm-cache *)",
       "Bash(node -e \"console.log\\(require\\('./package.json'\\).dependencies.xlsx\\)\")",
       "Bash(node -e \"console.log\\(require\\('./package.json'\\).dependencies['react-native-share']\\)\")",
-      "WebSearch"
+      "WebSearch",
+      "PowerShell(adb logcat -c)",
+      "PowerShell(Set-Location \"e:\\\\final-pos-app-03\\\\android\"; $env:JAVA_HOME = \"E:\\\\jdk17\\\\jdk-17.0.20+8\"; $env:GRADLE_USER_HOME = \"E:\\\\gradle-home\"; $env:TEMP = \"E:\\\\build-tmp\"; $env:TMP = \"E:\\\\build-tmp\"; .\\\\gradlew.bat assembleRelease --no-daemon)",
+      "PowerShell(adb shell am force-stop com.posmobile)",
+      "PowerShell(adb shell uiautomator dump /sdcard/window_dump.xml)",
+      "PowerShell(adb pull /sdcard/window_dump.xml \"E:\\\\final-pos-app-03\\\\window_dump.xml\")",
+      "PowerShell(adb shell uiautomator dump /sdcard/window_dump2.xml)",
+      "PowerShell(adb pull /sdcard/window_dump2.xml \"E:\\\\final-pos-app-03\\\\window_dump2.xml\")",
+      "Bash(php -l app/Services/ReportService.php)",
+      "Bash(rm -f \"e:/final-pos-app-03/.tsc_settlement.log\")",
+      "Bash(mkdir -p \"e:/npm-cache\")",
+      "Bash(npm_config_cache=\"e:/npm-cache\" npx tsc --noEmit -p .)"
     ],
     "additionalDirectories": [
       "E:\\npm-cache"

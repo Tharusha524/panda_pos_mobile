@@ -77,13 +77,18 @@ export const ReportViewScreen: React.FC = () => {
   // returns both sales and returns together (row.transaction_label tells
   // them apart), so it's filtered down to Return rows only after fetching.
   const isReturnReport = params.type === 'return_report';
-  const pivotExcelSupported = isDailySummary || isSalesReport || isReturnReport;
-  // Customer Settlement and Credit sales are already a flat column/row
-  // table (see reportPayload on the backend) — exported as-is via the
-  // generic table exporter instead of the item-level sales pivot above.
-  const isCustomerSettlement = params.type === 'customer_settlement';
+  // Credit sales Excel also needs to show the actual items bought (like
+  // Daily/Sales/Return do) instead of just Name/Phone/Outstanding — reuses
+  // the same item-level pivot, filtered down to credit-related sales only
+  // (either plain payment_method 'Credit', or a split-payment sale with a
+  // Credit portion) after fetching.
   const isCreditSales = params.type === 'credit_sales';
-  const genericExcelSupported = isCustomerSettlement || isCreditSales;
+  const pivotExcelSupported = isDailySummary || isSalesReport || isReturnReport || isCreditSales;
+  // Customer Settlement is already a flat column/row table (see
+  // reportPayload on the backend) — exported as-is via the generic table
+  // exporter instead of the item-level sales pivot above.
+  const isCustomerSettlement = params.type === 'customer_settlement';
+  const genericExcelSupported = isCustomerSettlement;
   const excelExportSupported = pivotExcelSupported || genericExcelSupported;
   const [dailySalesReport, setDailySalesReport] = useState<BackendReportData | null>(null);
   const [dailySalesLoading, setDailySalesLoading] = useState(false);
@@ -109,7 +114,16 @@ export const ReportViewScreen: React.FC = () => {
           setDailySalesReport(
             isReturnReport
               ? { ...report, sales: (report.sales ?? []).filter(s => s.transaction_label === 'Return') }
-              : report,
+              : isCreditSales
+                ? {
+                    ...report,
+                    sales: (report.sales ?? []).filter(
+                      s =>
+                        /^credit$/i.test(s.payment_method?.trim() ?? '') ||
+                        (s.payment_splits ?? []).some(sp => /^credit$/i.test(sp.payment_method?.trim() ?? '')),
+                    ),
+                  }
+                : report,
           );
         }
       })
@@ -176,17 +190,26 @@ export const ReportViewScreen: React.FC = () => {
         ? 'Sales Report'
         : isReturnReport
           ? 'Return Report'
-          : 'Daily Sale Report';
+          : isCreditSales
+            ? 'Credit Sales Report'
+            : 'Daily Sale Report';
       if (action === 'download') {
         const message = await downloadDailySalesExcel(
           dailySalesReport.sales ?? [],
           dateKey,
           dateLabel,
           title,
+          isReturnReport,
         );
         showError({ title: 'Excel saved', message, variant: 'info', confirmLabel: 'OK' });
       } else {
-        await shareDailySalesExcel(dailySalesReport.sales ?? [], dateKey, dateLabel, title);
+        await shareDailySalesExcel(
+          dailySalesReport.sales ?? [],
+          dateKey,
+          dateLabel,
+          title,
+          isReturnReport,
+        );
       }
     } catch (e) {
       showError({

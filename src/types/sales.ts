@@ -175,6 +175,16 @@ export interface SaleReceiptPayload {
     service_charge?: number;
     net_amount: number;
     amount_received?: number | null;
+    cheque_number?: string | null;
+    bank_name?: string | null;
+    /** Present only for a split-payment sale — part cash, part cheque,
+     * part credit, etc. */
+    payment_splits?: Array<{
+      payment_method: string;
+      amount: number;
+      cheque_number?: string | null;
+      bank_name?: string | null;
+    }>;
     lines: ReceiptLine[];
     discount_label?: string | null;
     show_barcode?: boolean;

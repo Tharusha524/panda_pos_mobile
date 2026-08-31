@@ -50,9 +50,9 @@ export const SaleReceiptScreen: React.FC = () => {
       setConfirming(false);
     }
   };
-  const [customerOutstandingBalance, setCustomerOutstandingBalance] = useState<
-    number | null
-  >(null);
+  const [fetchedCustomerBalance, setFetchedCustomerBalance] = useState<number | null>(
+    null,
+  );
   const receiptShotRef = useRef<ViewShotRef>(null);
 
   const canPrint = bluetoothPrintService.isSupported();
@@ -66,7 +66,7 @@ export const SaleReceiptScreen: React.FC = () => {
       .get(params.customerId)
       .then(c => {
         if (!cancelled) {
-          setCustomerOutstandingBalance(c.net_balance ?? null);
+          setFetchedCustomerBalance(c.net_balance ?? null);
         }
       })
       .catch(() => {
@@ -76,6 +76,15 @@ export const SaleReceiptScreen: React.FC = () => {
       cancelled = true;
     };
   }, [params.customerId]);
+
+  // On a not-yet-saved review (pendingConfirm), the fetched balance above is
+  // the customer's balance BEFORE this sale — add the sale's own pending
+  // Credit portion so the reviewer sees what the balance will be after
+  // Confirm, not a stale pre-sale figure.
+  const customerOutstandingBalance =
+    fetchedCustomerBalance !== null
+      ? fetchedCustomerBalance + (params.pendingCreditAmount ?? 0)
+      : null;
 
   const goNewSale = () => {
     navigation.dispatch(

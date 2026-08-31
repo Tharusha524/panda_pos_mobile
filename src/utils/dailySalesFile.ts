@@ -16,8 +16,14 @@ async function writeWorkbookTo(
   dateYmd: string,
   dateLabel: string,
   title: string,
+  includeReturns: boolean,
 ): Promise<{ path: string; isEmpty: boolean }> {
-  const { base64, isEmpty } = await buildDailySalesWorkbookBase64(sales, dateLabel, title);
+  const { base64, isEmpty } = await buildDailySalesWorkbookBase64(
+    sales,
+    dateLabel,
+    title,
+    includeReturns,
+  );
   const path = `${dirPath}/${fileNameFor(dateYmd, title)}`;
   if (await RNBlobUtil.fs.exists(path)) {
     await RNBlobUtil.fs.unlink(path);
@@ -34,6 +40,7 @@ export async function downloadDailySalesExcel(
   dateYmd: string,
   dateLabel: string,
   title: string = 'Daily Sale Report',
+  includeReturns: boolean = false,
 ): Promise<string> {
   const fileName = fileNameFor(dateYmd, title);
 
@@ -44,6 +51,7 @@ export async function downloadDailySalesExcel(
       dateYmd,
       dateLabel,
       title,
+      includeReturns,
     );
     // Registers the file with Android's Downloads app/notification so it
     // actually shows up there — a plain write alone leaves it invisible to
@@ -66,6 +74,7 @@ export async function downloadDailySalesExcel(
     dateYmd,
     dateLabel,
     title,
+    includeReturns,
   );
   return isEmpty
     ? `${fileName} saved (no sales recorded for this period). Find it via the Files app.`
@@ -82,6 +91,7 @@ export async function shareDailySalesExcel(
   dateYmd: string,
   dateLabel: string,
   title: string = 'Daily Sale Report',
+  includeReturns: boolean = false,
 ): Promise<void> {
   const { path } = await writeWorkbookTo(
     RNBlobUtil.fs.dirs.CacheDir,
@@ -89,6 +99,7 @@ export async function shareDailySalesExcel(
     dateYmd,
     dateLabel,
     title,
+    includeReturns,
   );
 
   await Share.open({

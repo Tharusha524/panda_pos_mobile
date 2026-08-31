@@ -32,6 +32,7 @@ import { refundCardStorage } from '@/services/storage/refundCardStorage';
 import { isInvalidHoldPinError } from '@/services/storage/holdPinStorage';
 import { useSavedHoldPin } from '@/hooks/useSavedHoldPin';
 import { formatCurrency } from '@/utils/format';
+import { formatDateYmd } from '@/utils/reportDateFilters';
 import { cartLineKey, itemHasBatches } from '@/utils/batchUtils';
 import {
   buildPaymentNotes,
@@ -718,7 +719,11 @@ export const SaleOrderScreen: React.FC = () => {
         order_status: 'completed',
         discount_type: pos.orderDiscountType,
         discount_percent: pos.discountPercent,
-        sale_date: new Date().toISOString(),
+        // Plain YYYY-MM-DD, local device time — matches exactly what the
+        // real (post-save) receipt shows via Sale.sale_date on the backend.
+        // A raw ISO datetime (with a Z/UTC suffix) printed as-is on the
+        // review screen showed the wrong day/time for anyone not in UTC.
+        sale_date: formatDateYmd(new Date()),
         location: pos.location,
         payment_method: isUsingSplitPayment ? 'Split' : paymentMethod,
         customer_name: customerName,
@@ -734,6 +739,20 @@ export const SaleOrderScreen: React.FC = () => {
         discount: pos.discount,
         net_amount: previewOrderTotal,
         amount_received: received,
+        cheque_number: !isUsingSplitPayment && /cheque/i.test(paymentMethod)
+          ? chequeNumber.trim() || null
+          : null,
+        bank_name: !isUsingSplitPayment && needsBank(paymentMethod)
+          ? String(bankId ?? '').trim() || null
+          : null,
+        payment_splits: isUsingSplitPayment
+          ? validSplitRows.map(r => ({
+              payment_method: r.paymentMethod,
+              amount: parseFloat(r.amount.replace(/,/g, '')) || 0,
+              cheque_number: r.chequeNumber.trim() || null,
+              bank_name: r.bankName.trim() || null,
+            }))
+          : undefined,
         lines: draftLines,
       },
       header: {},
@@ -742,11 +761,27 @@ export const SaleOrderScreen: React.FC = () => {
       labels: {},
     };
 
+    // Credit portion of this sale — not yet saved, so the customer's balance
+    // fetched below won't include it yet. Shown added on top so the review
+    // screen's "outstanding balance" reflects what it will be after Confirm.
+    const pendingCreditAmount = isUsingSplitPayment
+      ? round2(
+          validSplitRows
+            .filter(r => isCreditPayment(r.paymentMethod))
+            .reduce((sum, r) => sum + (parseFloat(r.amount.replace(/,/g, '')) || 0), 0),
+        )
+      : !pos.isReturn && isCreditPayment(paymentMethod)
+        ? round2(previewOrderTotal - received)
+        : 0;
+
     // Land on the real receipt screen in "review" mode instead of a popup —
     // it's the same screen/layout already used for the saved receipt (proven
     // to lay out correctly), just with Edit/Confirm in place of print/share.
     navigation.navigate('SaleReceipt', {
       receipt: draftReceipt,
+      customerId:
+        pos.customer && !isWalkInCustomer(pos.customer) ? pos.customer.id : null,
+      pendingCreditAmount: pendingCreditAmount > 0 ? pendingCreditAmount : undefined,
       pendingConfirm: {
         title: pos.isExchange
           ? 'Confirm exchange'

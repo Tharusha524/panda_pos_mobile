@@ -58,6 +58,11 @@ export type SalesStackParamList = {
     receipt: SaleReceiptPayload;
     customerId?: number | null;
     pendingConfirm?: PendingConfirm;
+    /** Present only on a not-yet-saved review (pendingConfirm) screen for a
+     * sale with a Credit portion — the amount about to be added to the
+     * customer's balance, so the shown outstanding balance can include it
+     * even though the sale hasn't actually been saved yet. */
+    pendingCreditAmount?: number;
   };
   HoldOrders: undefined;
   CustomerForm: { customerId?: number; selectOnSave?: boolean };
