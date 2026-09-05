@@ -9,6 +9,8 @@ interface PivotItemColumn {
 }
 
 interface PivotRow {
+  date: string;
+  billNo: string;
   customer: string;
   route: string;
   /** Keyed by payment method — a plain sale has exactly one entry; a split
@@ -109,14 +111,27 @@ export function buildDailySalesPivot(
       bankName = bankNames.join(' / ');
     } else {
       const paymentMethod = sale.payment_method?.trim() || '—';
-      amountsByMethod[paymentMethod] = sale.net_amount;
-      if (!seenMethods.has(paymentMethod)) {
-        seenMethods.add(paymentMethod);
-        paymentMethods.push(paymentMethod);
+      // A sale labeled "Split" but with no actual split rows is broken data
+      // (saved before the split-payment save fix went live) — showing it as
+      // its own "Split" column would be misleading. Leave it out of the
+      // payment-method breakdown entirely; its Total column still shows the
+      // right amount, just with no method attributed to it.
+      if (!/^split$/i.test(paymentMethod)) {
+        amountsByMethod[paymentMethod] = sale.net_amount;
+        if (!seenMethods.has(paymentMethod)) {
+          seenMethods.add(paymentMethod);
+          paymentMethods.push(paymentMethod);
+        }
       }
     }
 
+    // sale.date is "dd-mm-yyyy HH:mm" — just the date portion here, the
+    // sale's own time isn't meaningful to a per-bill Excel row.
+    const dateOnly = sale.date?.split(' ')[0] ?? '';
+
     return {
+      date: dateOnly,
+      billNo: sale.sales_id ?? '',
       customer: sale.customer || 'Walk-in',
       route: sale.route?.trim() || '',
       amountsByMethod,
@@ -167,10 +182,17 @@ export async function buildDailySalesWorkbookBase64(
   const { columns, paymentMethods, rows, totals } = buildDailySalesPivot(sales, includeReturns);
   // Falls back to one placeholder column so the "Payment Method" header
   // still has something to merge across on an empty (no-sales) sheet.
-  const methodCols = paymentMethods.length > 0 ? paymentMethods : ['Payment Method'];
+  // Any cheque-type method is floated to the end of this list so its column
+  // sits immediately next to the "Ch. Details" (Cheque Number/Bank Name)
+  // columns that follow right after — otherwise they'd end up separated by
+  // whichever other methods (Cash, Credit, ...) came first that day.
+  const methodCols = (paymentMethods.length > 0 ? paymentMethods : ['Payment Method'])
+    .slice()
+    .sort((a, b) => (/cheque/i.test(a) ? 1 : 0) - (/cheque/i.test(b) ? 1 : 0));
 
-  // Route + Name + item pairs + one column per payment method + Cheque Number + Bank Name + Total
-  const itemColsEnd = 2 + columns.length * 2;
+  // Date + Bill No + Route + Name + item pairs + one column per payment
+  // method + Cheque Number + Bank Name + Total
+  const itemColsEnd = 4 + columns.length * 2;
   const paymentStart = itemColsEnd + 1;
   const paymentEnd = paymentStart + methodCols.length - 1;
   const chequeCol = paymentEnd + 1;
@@ -184,16 +206,18 @@ export async function buildDailySalesWorkbookBase64(
   // Widened throughout — narrower values here previously clipped/wrapped
   // "Route", long customer names, cheque amounts (showing as ####) and
   // "Bank Name" in Excel.
-  ws.getColumn(1).width = 14;
-  ws.getColumn(2).width = 26;
+  ws.getColumn(1).width = 12;
+  ws.getColumn(2).width = 12;
+  ws.getColumn(3).width = 14;
+  ws.getColumn(4).width = 26;
   // Item columns stay narrow on purpose — widening every one to fit its
   // full name on one line made the whole sheet unreasonably wide. Instead
   // the item name header wraps onto multiple lines within this narrow
   // width (see wrapText + the taller header row below), which keeps the
   // sheet compact while still showing the full name clearly.
   columns.forEach((_, idx) => {
-    ws.getColumn(3 + idx * 2).width = 8;
-    ws.getColumn(4 + idx * 2).width = 10;
+    ws.getColumn(5 + idx * 2).width = 8;
+    ws.getColumn(6 + idx * 2).width = 10;
   });
   methodCols.forEach((_, idx) => {
     ws.getColumn(paymentStart + idx).width = 16;
@@ -215,8 +239,8 @@ export async function buildDailySalesWorkbookBase64(
   // sub-labels underneath) — Payment Method gets one sub-column per method
   // actually used that day, same merged-header pattern each item column and
   // Ch. Details already use (title on top, sub-labels underneath).
-  const headerRow1: (string | number)[] = ['Route', 'Name'];
-  const headerRow2: (string | number)[] = ['', ''];
+  const headerRow1: (string | number)[] = ['Date', 'Bill No', 'Route', 'Name'];
+  const headerRow2: (string | number)[] = ['', '', '', ''];
   for (const col of columns) {
     headerRow1.push(col.key, '');
     headerRow2.push('Pcs', 'Unit Price');
@@ -237,7 +261,7 @@ export async function buildDailySalesWorkbookBase64(
   ws.getRow(headerRowIndex1).height = 60;
 
   columns.forEach((_, idx) => {
-    const startCol = 3 + idx * 2;
+    const startCol = 5 + idx * 2;
     ws.mergeCells(headerRowIndex1, startCol, headerRowIndex1, startCol + 1);
   });
   ws.mergeCells(headerRowIndex1, paymentStart, headerRowIndex1, paymentEnd);
@@ -245,6 +269,8 @@ export async function buildDailySalesWorkbookBase64(
   ws.mergeCells(headerRowIndex1, totalCol, headerRowIndex2, totalCol);
   ws.mergeCells(headerRowIndex1, 1, headerRowIndex2, 1);
   ws.mergeCells(headerRowIndex1, 2, headerRowIndex2, 2);
+  ws.mergeCells(headerRowIndex1, 3, headerRowIndex2, 3);
+  ws.mergeCells(headerRowIndex1, 4, headerRowIndex2, 4);
 
   for (let r = headerRowIndex1; r <= headerRowIndex2; r++) {
     for (let c = 1; c <= totalCols; c++) {
@@ -261,7 +287,7 @@ export async function buildDailySalesWorkbookBase64(
 
   // Data rows
   for (const row of rows) {
-    const line: (string | number)[] = [row.route, row.customer];
+    const line: (string | number)[] = [row.date, row.billNo, row.route, row.customer];
     for (const col of columns) {
       const cell = row.perItem[col.key];
       line.push(cell ? cell.qty : '', cell ? cell.unitPrice : '');
@@ -275,7 +301,7 @@ export async function buildDailySalesWorkbookBase64(
   }
 
   // Total row
-  const totalLine: (string | number)[] = ['', 'Total'];
+  const totalLine: (string | number)[] = ['', '', '', 'Total'];
   for (const col of columns) {
     const t = totals.perItem[col.key];
     // Unit price isn't summable across sales — leave that side of the total row blank.

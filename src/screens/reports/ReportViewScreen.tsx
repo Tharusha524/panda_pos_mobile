@@ -21,7 +21,7 @@ import { reportService } from '@/services/api/reportService';
 import { navigateToPrinterSetup } from '@/navigation/navigationRef';
 import { getReportMeta } from '@/types/reports';
 import type { ReportsStackParamList } from '@/navigation/types';
-import type { BackendReportData } from '@/types/backendReports';
+import type { BackendReportData, SalesSummarySale } from '@/types/backendReports';
 import { colors } from '@/theme';
 import {
   defaultReportFilters,
@@ -45,6 +45,47 @@ type Route = RouteProp<ReportsStackParamList, 'ReportView'>;
 
 const isPrinterSetupError = (msg: string): boolean =>
   /no printer|not configured|settings/i.test(msg);
+
+/** Matches a Sale row's items against its returned_items (by item number,
+ * falling back to description) and subtracts the returned qty/amount from
+ * each matched item — so a partially returned bill shows correctly reduced
+ * Pcs/amounts in the Sales Report Excel instead of the full original
+ * quantities. Returns null when the bill was fully returned (dropped from
+ * the report entirely, matching the on-screen Sales Report). */
+const applyReturnsToSalesReportRow = (sale: SalesSummarySale): SalesSummarySale | null => {
+  const returnedAmount = sale.returned_amount ?? 0;
+  const netAfterReturn = Math.round((sale.net_amount - returnedAmount) * 100) / 100;
+  if (netAfterReturn <= 0.01) {
+    return null;
+  }
+
+  const returnedItems = sale.returned_items ?? [];
+  if (returnedItems.length === 0) {
+    return sale;
+  }
+
+  const returnedByKey = new Map(
+    returnedItems.map(r => [(r.item_number?.trim() || r.description?.trim() || '').toUpperCase(), r]),
+  );
+
+  const items = sale.items
+    .map(item => {
+      const key = (item.item_number?.trim() || item.description?.trim() || '').toUpperCase();
+      const returned = key ? returnedByKey.get(key) : undefined;
+      if (!returned) {
+        return item;
+      }
+      const qty = Math.round((item.qty - returned.qty) * 100) / 100;
+      if (qty <= 0.009) {
+        return null;
+      }
+      const amount = Math.round((item.amount - returned.amount) * 100) / 100;
+      return { ...item, qty, amount, net_price: qty > 0 ? Math.round((amount / qty) * 100) / 100 : item.unit_price };
+    })
+    .filter((item): item is SalesSummarySale['items'][number] => item !== null);
+
+  return { ...sale, net_amount: netAfterReturn, items };
+};
 
 export const ReportViewScreen: React.FC = () => {
   const { params } = useRoute<Route>();
@@ -123,7 +164,19 @@ export const ReportViewScreen: React.FC = () => {
                         (s.payment_splits ?? []).some(sp => /^credit$/i.test(sp.payment_method?.trim() ?? '')),
                     ),
                   }
-                : report,
+                : isSalesReport || isDailySummary
+                  ? {
+                      ...report,
+                      // Deducts each bill's returned amount/items the same
+                      // way for both reports — buildDailySalesPivot still
+                      // separately filters out the Return-type rows
+                      // themselves (untouched by this), so only the
+                      // adjusted Sale rows end up in the final sheet.
+                      sales: (report.sales ?? [])
+                        .map(applyReturnsToSalesReportRow)
+                        .filter((s): s is SalesSummarySale => s !== null),
+                    }
+                  : report,
           );
         }
       })

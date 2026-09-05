@@ -178,10 +178,12 @@ export const TodayActivityScreen: React.FC = () => {
           iconBg: colors.backgroundAlt,
           iconColor: colors.text,
           label: 'Today\'s actual sales',
-          value: formatCurrency(summary.today_sales_amount, currency),
+          // Net of today's returns — falls back to the gross figure only if
+          // the backend hasn't sent the netted one (older API).
+          value: formatCurrency(summary.today_net_sales_amount ?? summary.today_sales_amount, currency),
           hint:
             (summary.today_returns_count ?? 0) > 0
-              ? `${formatNumber(summary.today_sales_count)} sales · ${formatNumber(summary.today_returns_count)} returns (separate)`
+              ? `${formatNumber(summary.today_sales_count)} sales · ${formatNumber(summary.today_returns_count)} returns (deducted)`
               : `${formatNumber(summary.today_sales_count)} sale bills`,
         }
       : tab === 'purchases'
