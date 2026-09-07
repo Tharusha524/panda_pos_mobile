@@ -73,12 +73,11 @@ const RowCard: React.FC<{
   <Pressable
     disabled={!onPress}
     onPress={onPress}
-    style={({ pressed }) => [
+    style={[
       styles.card,
       shadows.sm,
       accent === 'warning' && styles.cardWarning,
       accent === 'return' && styles.cardReturn,
-      onPress && pressed && styles.cardPressed,
     ]}>
     <View style={[styles.iconWrap, { backgroundColor: iconBg }]}>{icon}</View>
     <View style={styles.body}>

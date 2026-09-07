@@ -61,12 +61,11 @@ export const ActivityTableRow: React.FC<{
   <Pressable
     disabled={!onPress}
     onPress={onPress}
-    style={({ pressed }) => [
+    style={[
       styles.row,
       !isLast && styles.rowBorder,
       accent === 'warning' && styles.rowWarning,
       accent === 'return' && styles.rowReturn,
-      onPress && pressed && styles.rowPressed,
     ]}>
     {columns.map((col, index) => (
       <View

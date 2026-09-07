@@ -95,7 +95,7 @@ export const BackendReportView: React.FC<BackendReportViewProps> = ({
           key={sale.id}
           disabled={!onRowPress}
           onPress={onRowPress ? () => onRowPress(sale.id) : undefined}
-          style={({ pressed }) => [styles.rowCard, onRowPress && pressed && styles.rowCardPressed]}>
+          style={styles.rowCard}>
           {/* Sales No -> Customer Name -> Payment Type -> Net, in that order. */}
           <Text style={[styles.rowTitle, bodyText(13)]}>{sale.sales_id ?? `#${sale.id}`}</Text>
           <Text style={[styles.rowSub, bodyText(12)]}>{sale.customer}</Text>

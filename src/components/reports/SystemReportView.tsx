@@ -149,7 +149,7 @@ export const SystemReportView: React.FC<SystemReportViewProps> = ({
           key={`${row.id}-${row.sales_id}`}
           disabled={!onSalePress}
           onPress={onSalePress ? () => onSalePress(row.id) : undefined}
-          style={({ pressed }) => [styles.rowCard, onSalePress && pressed && styles.rowCardPressed]}>
+          style={styles.rowCard}>
           <HStack justifyContent="space-between" alignItems="flex-start">
             <VStack flex={1} pr="$2">
               <Text style={[styles.rowTitle, bodyText(13)]}>{row.sales_id}</Text>
