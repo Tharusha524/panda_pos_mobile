@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, shadows, typography } from '@/theme';
 
 export interface ActivityTableColumn {
@@ -56,13 +56,17 @@ export const ActivityTableRow: React.FC<{
   cells: React.ReactNode[];
   isLast?: boolean;
   accent?: 'default' | 'warning' | 'return';
-}> = ({ columns, cells, isLast, accent = 'default' }) => (
-  <View
-    style={[
+  onPress?: () => void;
+}> = ({ columns, cells, isLast, accent = 'default', onPress }) => (
+  <Pressable
+    disabled={!onPress}
+    onPress={onPress}
+    style={({ pressed }) => [
       styles.row,
       !isLast && styles.rowBorder,
       accent === 'warning' && styles.rowWarning,
       accent === 'return' && styles.rowReturn,
+      onPress && pressed && styles.rowPressed,
     ]}>
     {columns.map((col, index) => (
       <View
@@ -76,7 +80,7 @@ export const ActivityTableRow: React.FC<{
         {cells[index]}
       </View>
     ))}
-  </View>
+  </Pressable>
 );
 
 export const tableCellText = StyleSheet.create({
@@ -149,6 +153,9 @@ const styles = StyleSheet.create({
   },
   rowReturn: {
     backgroundColor: colors.errorSoft,
+  },
+  rowPressed: {
+    opacity: 0.6,
   },
   cell: {
     justifyContent: 'center',

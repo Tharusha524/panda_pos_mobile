@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, StyleSheet, View, type TextStyle, type ViewStyle } from 'react-native';
+import { Image, Pressable, StyleSheet, View, type TextStyle, type ViewStyle } from 'react-native';
 import { HStack, Text, VStack } from '@gluestack-ui/themed';
 import { useReceiptLogoUri } from '@/hooks/useReceiptLogoUri';
 import { useReceiptStyleScale } from '@/hooks/useReceiptStyleScale';
@@ -12,6 +12,11 @@ import { TRANSACTION_TYPE_EXCHANGE, TRANSACTION_TYPE_RETURN } from '@/types/sale
 interface SystemReportViewProps {
   report: SystemReportPayload;
   settings?: PosMobileSettings | null;
+  /** Tapping a transaction row opens that sale's real, printable receipt —
+   * not the summary this list itself sits under. Rows render as plain
+   * (non-interactive) views when omitted, e.g. inside the ViewShot capture
+   * used for the whole-day Bluetooth print/image. */
+  onSalePress?: (saleId: number) => void;
 }
 
 const MetaRow: React.FC<{ label: string; value: string; textStyle?: TextStyle }> = ({
@@ -37,6 +42,7 @@ const Divider: React.FC<{ style?: ViewStyle }> = ({ style }) => (
 export const SystemReportView: React.FC<SystemReportViewProps> = ({
   report,
   settings,
+  onSalePress,
 }) => {
   const logoUrl = useReceiptLogoUri(settings, null);
   const {
@@ -139,7 +145,11 @@ export const SystemReportView: React.FC<SystemReportViewProps> = ({
       const isRefundDue = isExchange && row.amount < 0;
       const showAsReturn = isReturn || isRefundDue;
       return (
-        <View key={`${row.id}-${row.sales_id}`} style={styles.rowCard}>
+        <Pressable
+          key={`${row.id}-${row.sales_id}`}
+          disabled={!onSalePress}
+          onPress={onSalePress ? () => onSalePress(row.id) : undefined}
+          style={({ pressed }) => [styles.rowCard, onSalePress && pressed && styles.rowCardPressed]}>
           <HStack justifyContent="space-between" alignItems="flex-start">
             <VStack flex={1} pr="$2">
               <Text style={[styles.rowTitle, bodyText(13)]}>{row.sales_id}</Text>
@@ -159,7 +169,7 @@ export const SystemReportView: React.FC<SystemReportViewProps> = ({
               </Text>
             </VStack>
           </HStack>
-        </View>
+        </Pressable>
       );
     });
   };
@@ -335,6 +345,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
+  },
+  rowCardPressed: {
+    opacity: 0.6,
   },
   rowTitle: {
     fontSize: 13,

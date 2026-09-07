@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   AlertTriangle,
   RotateCcw,
@@ -57,6 +57,7 @@ const RowCard: React.FC<{
   meta?: string;
   pill?: React.ReactNode;
   accent?: 'default' | 'warning' | 'return';
+  onPress?: () => void;
 }> = ({
   icon,
   iconBg,
@@ -67,13 +68,17 @@ const RowCard: React.FC<{
   meta,
   pill,
   accent = 'default',
+  onPress,
 }) => (
-  <View
-    style={[
+  <Pressable
+    disabled={!onPress}
+    onPress={onPress}
+    style={({ pressed }) => [
       styles.card,
       shadows.sm,
       accent === 'warning' && styles.cardWarning,
       accent === 'return' && styles.cardReturn,
+      onPress && pressed && styles.cardPressed,
     ]}>
     <View style={[styles.iconWrap, { backgroundColor: iconBg }]}>{icon}</View>
     <View style={styles.body}>
@@ -105,13 +110,16 @@ const RowCard: React.FC<{
         </View>
       )}
     </View>
-  </View>
+  </Pressable>
 );
 
 export const TodaySalesList: React.FC<{
   rows: TodaySaleRow[];
   currency: string;
-}> = ({ rows, currency }) => {
+  /** Tapping a row opens that sale's real, printable receipt — not the
+   * whole-day summary this list itself sits under. */
+  onRowPress?: (row: TodaySaleRow) => void;
+}> = ({ rows, currency, onRowPress }) => {
   if (rows.length === 0) {
     return <EmptyState message="No sales recorded today yet." />;
   }
@@ -125,6 +133,7 @@ export const TodaySalesList: React.FC<{
         return (
           <RowCard
             key={row.id}
+            onPress={onRowPress ? () => onRowPress(row) : undefined}
             icon={<ShoppingCart size={18} color={colors.primary} strokeWidth={2.2} />}
             iconBg={colors.primarySoft}
             title={row.sales_id}
@@ -232,6 +241,9 @@ const styles = StyleSheet.create({
   cardReturn: {
     borderColor: colors.error,
     backgroundColor: colors.errorSoft,
+  },
+  cardPressed: {
+    opacity: 0.7,
   },
   iconWrap: {
     width: 40,

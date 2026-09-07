@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, StyleSheet, View, type TextStyle, type ViewStyle } from 'react-native';
+import { Image, Pressable, StyleSheet, View, type TextStyle, type ViewStyle } from 'react-native';
 import { HStack, Text, VStack } from '@gluestack-ui/themed';
 import {
   ActivityDataTable,
@@ -21,6 +21,10 @@ interface BackendReportViewProps {
   /** Which catalog report this data came from — used to trim wide reports down
    * to their highest-value columns (see reportColumnFilters). */
   reportType: SystemReportType;
+  /** Tapping a row whose data includes a numeric `id` (sales_report and
+   * return_report rows only — see ReportService::salesDetails) opens that
+   * transaction's real, printable receipt. */
+  onRowPress?: (saleId: number) => void;
 }
 
 const formatCell = (value: unknown, currency: string): string => {
@@ -50,6 +54,7 @@ export const BackendReportView: React.FC<BackendReportViewProps> = ({
   header,
   settings,
   reportType,
+  onRowPress,
 }) => {
   const logoUrl = useReceiptLogoUri(settings, null);
   const {
@@ -86,7 +91,11 @@ export const BackendReportView: React.FC<BackendReportViewProps> = ({
     return sales.map(sale => {
       const isReturn = sale.transaction_label === 'Return';
       return (
-        <View key={sale.id} style={styles.rowCard}>
+        <Pressable
+          key={sale.id}
+          disabled={!onRowPress}
+          onPress={onRowPress ? () => onRowPress(sale.id) : undefined}
+          style={({ pressed }) => [styles.rowCard, onRowPress && pressed && styles.rowCardPressed]}>
           {/* Sales No -> Customer Name -> Payment Type -> Net, in that order. */}
           <Text style={[styles.rowTitle, bodyText(13)]}>{sale.sales_id ?? `#${sale.id}`}</Text>
           <Text style={[styles.rowSub, bodyText(12)]}>{sale.customer}</Text>
@@ -114,7 +123,7 @@ export const BackendReportView: React.FC<BackendReportViewProps> = ({
               ))}
             </VStack>
           ) : null}
-        </View>
+        </Pressable>
       );
     });
   };
@@ -128,18 +137,22 @@ export const BackendReportView: React.FC<BackendReportViewProps> = ({
       <ActivityDataTable
         columns={tableColumns}
         emptyMessage="No records for the selected period or branch.">
-        {report.rows.map((row, idx) => (
-          <ActivityTableRow
-            key={`row-${idx}`}
-            columns={tableColumns}
-            isLast={idx === report.rows.length - 1}
-            cells={visibleColumns.map(col => (
-              <Text key={col.key} style={[styles.tableCell, bodyText(11)]} numberOfLines={2}>
-                {formatCell(row[col.key], currency)}
-              </Text>
-            ))}
-          />
-        ))}
+        {report.rows.map((row, idx) => {
+          const saleId = typeof row.id === 'number' ? row.id : null;
+          return (
+            <ActivityTableRow
+              key={`row-${idx}`}
+              columns={tableColumns}
+              isLast={idx === report.rows.length - 1}
+              onPress={saleId !== null && onRowPress ? () => onRowPress(saleId) : undefined}
+              cells={visibleColumns.map(col => (
+                <Text key={col.key} style={[styles.tableCell, bodyText(11)]} numberOfLines={2}>
+                  {formatCell(row[col.key], currency)}
+                </Text>
+              ))}
+            />
+          );
+        })}
       </ActivityDataTable>
     );
   };
@@ -296,6 +309,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
+  },
+  rowCardPressed: {
+    opacity: 0.6,
   },
   rowTitle: {
     fontSize: 13,

@@ -39,6 +39,9 @@ export type ReportsStackParamList = {
   ReportsList: undefined;
   ReportCategory: { categoryId: ReportCategoryId };
   ReportView: { type: SystemReportType };
+  // Reuses the same screen/route name as HomeStackParamList's — tapping a
+  // transaction row in a report opens the same real receipt view.
+  CustomerSaleReceipt: { receipt: SaleReceiptPayload; customerId?: number | null };
 };
 
 export type AuthStackParamList = {

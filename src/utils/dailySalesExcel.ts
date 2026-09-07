@@ -225,6 +225,8 @@ export async function buildDailySalesWorkbookBase64(
   ws.getColumn(chequeCol).width = 16;
   ws.getColumn(bankCol).width = 22;
   ws.getColumn(totalCol).width = 14;
+  // Total column only — shown as "10,000.00" instead of the plain number.
+  ws.getColumn(totalCol).numFmt = '#,##0.00';
 
   // Title row
   const titleRow = ws.addRow([`${title} — ${dateLabel}`]);

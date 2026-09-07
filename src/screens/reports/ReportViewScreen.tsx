@@ -3,7 +3,8 @@ import { RefreshControl, View } from 'react-native';
 import ViewShot, { type ViewShotRef } from 'react-native-view-shot';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Box, Text, VStack } from '@gluestack-ui/themed';
-import { useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
@@ -18,6 +19,7 @@ import { ReportFilterBar } from '@/components/reports/ReportFilterBar';
 import { useSystemReport } from '@/hooks/useSystemReport';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { reportService } from '@/services/api/reportService';
+import { salesService } from '@/services/api/salesService';
 import { navigateToPrinterSetup } from '@/navigation/navigationRef';
 import { getReportMeta } from '@/types/reports';
 import type { ReportsStackParamList } from '@/navigation/types';
@@ -89,6 +91,7 @@ const applyReturnsToSalesReportRow = (sale: SalesSummarySale): SalesSummarySale 
 
 export const ReportViewScreen: React.FC = () => {
   const { params } = useRoute<Route>();
+  const navigation = useNavigation<NativeStackNavigationProp<ReportsStackParamList>>();
   const insets = useSafeAreaInsets();
   const { settings, currency } = usePosSettings();
   const { showError, showConfirm } = useErrorDialog();
@@ -98,8 +101,27 @@ export const ReportViewScreen: React.FC = () => {
     filters,
   );
   const [printing, setPrinting] = useState(false);
+  const [receiptLoading, setReceiptLoading] = useState(false);
   const reportShotRef = useRef<ViewShotRef>(null);
   const lastError = useRef<string | null>(null);
+
+  /* ── Tap a transaction row in the report → fetch its real receipt and
+   * open it — separate from the whole-report Bluetooth print/Excel export. */
+  const handleSaleRowPress = async (saleId: number) => {
+    setReceiptLoading(true);
+    try {
+      const receipt = await salesService.getReceipt(saleId);
+      navigation.navigate('CustomerSaleReceipt', { receipt });
+    } catch (e) {
+      showError({
+        title: 'Receipt unavailable',
+        message: e instanceof Error ? e.message : 'Could not load receipt for this sale.',
+        variant: 'warning',
+      });
+    } finally {
+      setReceiptLoading(false);
+    }
+  };
 
   const meta = getReportMeta(params.type);
   const header = useMemo(() => buildHeader(settings), [settings]);
@@ -381,6 +403,7 @@ export const ReportViewScreen: React.FC = () => {
       />
 
       {loading && !result ? <LoadingOverlay message="Loading report…" /> : null}
+      {receiptLoading ? <LoadingOverlay message="Loading receipt…" /> : null}
 
       <SmoothScrollView
         contentContainerStyle={{
@@ -410,6 +433,7 @@ export const ReportViewScreen: React.FC = () => {
                   header={header}
                   settings={settings}
                   reportType={params.type}
+                  onRowPress={handleSaleRowPress}
                 />
               </View>
             ) : !dailySalesLoading && dailySalesError ? (
@@ -446,13 +470,18 @@ export const ReportViewScreen: React.FC = () => {
                 options={{ format: 'png', quality: 1, result: 'tmpfile' }}
                 style={{ backgroundColor: '#fff' }}>
                 {result.source === 'dashboard' ? (
-                  <SystemReportView report={result.report} settings={settings} />
+                  <SystemReportView
+                    report={result.report}
+                    settings={settings}
+                    onSalePress={handleSaleRowPress}
+                  />
                 ) : (
                   <BackendReportView
                     report={result.report}
                     header={header}
                     settings={settings}
                     reportType={params.type}
+                    onRowPress={handleSaleRowPress}
                   />
                 )}
               </ViewShot>

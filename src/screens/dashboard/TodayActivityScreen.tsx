@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { RefreshControl, StyleSheet, View } from 'react-native';
-import { useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { Box, Text } from '@gluestack-ui/themed';
 import {
@@ -26,11 +27,13 @@ import {
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { useTodayActivity } from '@/hooks/useTodayActivity';
+import { salesService } from '@/services/api/salesService';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { navigateToPrinterSetup } from '@/navigation/navigationRef';
 import { formatCurrency, formatNumber } from '@/utils/format';
 import type { DailyReceiptKind } from '@/utils/dailyReceiptEscPos';
 import type { SystemReportHeader } from '@/types/reports';
+import type { TodaySaleRow } from '@/types/dashboard';
 import { colors, shadows, typography, TAB_BAR_SCROLL_PADDING } from '@/theme';
 import type { HomeStackParamList } from '@/navigation/types';
 import type { TodayActivityTab } from '@/navigation/types';
@@ -57,12 +60,31 @@ const buildHeader = (settings: ReturnType<typeof usePosSettings>['settings']): S
 
 export const TodayActivityScreen: React.FC = () => {
   const route = useRoute<Route>();
+  const navigation = useNavigation<NativeStackNavigationProp<HomeStackParamList>>();
   const { showError, showConfirm } = useErrorDialog();
   const { currency, settings } = usePosSettings();
   const { data, loading, refreshing, error, refresh } = useTodayActivity();
   const [tab, setTab] = useState<TodayActivityTab>(route.params?.tab ?? 'sales');
   const [salesFilter, setSalesFilter] = useState<TodaySalesFilter>('all');
   const [printing, setPrinting] = useState(false);
+  const [receiptLoading, setReceiptLoading] = useState(false);
+
+  /* ── Tap a sale row → fetch its real receipt and open it ── */
+  const handleSaleRowPress = async (row: TodaySaleRow) => {
+    setReceiptLoading(true);
+    try {
+      const receipt = await salesService.getReceipt(row.id);
+      navigation.navigate('CustomerSaleReceipt', { receipt });
+    } catch (e) {
+      showError({
+        title: 'Receipt unavailable',
+        message: e instanceof Error ? e.message : 'Could not load receipt for this sale.',
+        variant: 'warning',
+      });
+    } finally {
+      setReceiptLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (route.params?.tab) {
@@ -215,6 +237,7 @@ export const TodayActivityScreen: React.FC = () => {
       ) : null}
 
       {printing ? <LoadingOverlay message="Printing receipt…" /> : null}
+      {receiptLoading ? <LoadingOverlay message="Loading receipt…" /> : null}
 
       <SmoothScrollView
         style={styles.scroll}
@@ -290,7 +313,11 @@ export const TodayActivityScreen: React.FC = () => {
                   },
                 ]}
               />
-              <TodaySalesList rows={filteredSales} currency={currency} />
+              <TodaySalesList
+                rows={filteredSales}
+                currency={currency}
+                onRowPress={handleSaleRowPress}
+              />
             </>
           ) : null}
           {tab === 'purchases' ? (
