@@ -72,9 +72,19 @@ export const CustomerFormScreen: React.FC = () => {
   const [address, setAddress] = useState('');
   const [taxId, setTaxId] = useState('');
   const [locations, setLocations] = useState<string[]>(['Main Location']);
+  const [routeOptions, setRouteOptions] = useState<string[]>([]);
+  const [routeDropdownOpen, setRouteDropdownOpen] = useState(false);
   const [gpsLatitude, setGpsLatitude] = useState<number | null>(null);
   const [gpsLongitude, setGpsLongitude] = useState<number | null>(null);
   const [capturingLocation, setCapturingLocation] = useState(false);
+
+  const filteredRouteOptions = React.useMemo(() => {
+    const query = customerRoute.trim().toLowerCase();
+    const matches = query
+      ? routeOptions.filter(r => r.toLowerCase().includes(query))
+      : routeOptions;
+    return matches.filter(r => r.toLowerCase() !== query);
+  }, [routeOptions, customerRoute]);
 
   const scrollToFocusedField = useCallback(() => {
     if (!scrollRef.current) return;
@@ -97,6 +107,15 @@ export const CustomerFormScreen: React.FC = () => {
         setLocations(
           list.filters.locations.length ? list.filters.locations : ['Main Location'],
         );
+
+        const seenRoutes = new Set<string>();
+        for (const c of list.customers) {
+          const r = c.route?.trim();
+          if (r) {
+            seenRoutes.add(r);
+          }
+        }
+        setRouteOptions(Array.from(seenRoutes).sort((a, b) => a.localeCompare(b)));
 
         if (isEdit && customerId) {
           const customer = await customerService.get(customerId);
@@ -362,15 +381,44 @@ export const CustomerFormScreen: React.FC = () => {
               />
 
               <Label>Route *</Label>
-              <TextInput
-                value={customerRoute}
-                onChangeText={setCustomerRoute}
-                style={appInputStyle}
-                placeholder="e.g. Colombo North"
-                placeholderTextColor={appInputPlaceholderColor}
-                editable={!submitting}
-                onFocus={scrollToFocusedField}
-              />
+              <View style={styles.routeFieldWrap}>
+                <TextInput
+                  value={customerRoute}
+                  onChangeText={text => {
+                    setCustomerRoute(text);
+                    setRouteDropdownOpen(true);
+                  }}
+                  style={appInputStyle}
+                  placeholder="e.g. Colombo North"
+                  placeholderTextColor={appInputPlaceholderColor}
+                  editable={!submitting}
+                  onFocus={() => {
+                    scrollToFocusedField();
+                    setRouteDropdownOpen(true);
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => setRouteDropdownOpen(false), 150);
+                  }}
+                />
+                {routeDropdownOpen && filteredRouteOptions.length > 0 ? (
+                  <View style={styles.routeDropdown}>
+                    <SmoothScrollView keyboardShouldPersistTaps="handled" style={styles.routeDropdownScroll}>
+                      {filteredRouteOptions.map(r => (
+                        <TouchableOpacity
+                          key={r}
+                          style={styles.routeDropdownRow}
+                          onPress={() => {
+                            setCustomerRoute(r);
+                            setRouteDropdownOpen(false);
+                            Keyboard.dismiss();
+                          }}>
+                          <Text color={colors.text}>{r}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </SmoothScrollView>
+                  </View>
+                ) : null}
+              </View>
 
               <Label>Address</Label>
               <TextInput
@@ -484,6 +532,37 @@ const styles = StyleSheet.create({
   },
   callButtonDisabled: {
     backgroundColor: colors.border,
+  },
+  routeFieldWrap: {
+    position: 'relative',
+    zIndex: 10,
+  },
+  routeDropdown: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: 4,
+    maxHeight: 180,
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    zIndex: 20,
+  },
+  routeDropdownScroll: {
+    maxHeight: 180,
+  },
+  routeDropdownRow: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
   scroll: {
     flexGrow: 1,

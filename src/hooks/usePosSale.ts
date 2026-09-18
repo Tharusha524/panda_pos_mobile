@@ -51,7 +51,6 @@ import { isCreditPayment, resolveCreditPaymentMethod } from '@/utils/paymentMeth
 import {
   mergePosCatalogAcrossBranches,
   itemNumberKey,
-  POS_CATALOG_LOCATION,
   prepareCheckoutCart,
   resolveCartItemForSale,
   resolveInventoryRowForCartLine,
@@ -214,14 +213,17 @@ export const usePosSale = () => {
     setCustomers(result.customers);
   }, []);
 
-  const loadCategories = useCallback(async () => {
-    const cats = await inventoryService.getCategories({
-      location: POS_CATALOG_LOCATION,
-    });
-    setCategories(cats);
-    setCategoryId(null);
-    setSubCategoryId('all');
-  }, []);
+  const loadCategories = useCallback(
+    async (locationOverride?: string) => {
+      const cats = await inventoryService.getCategories({
+        location: (locationOverride ?? branchLocation) || undefined,
+      });
+      setCategories(cats);
+      setCategoryId(null);
+      setSubCategoryId('all');
+    },
+    [branchLocation],
+  );
 
   const syncBatchItemIds = useCallback((loaded: InventoryItem[]) => {
     setBatchItemIds(prev => {
@@ -238,7 +240,8 @@ export const usePosSale = () => {
   }, []);
 
   const loadItems = useCallback(
-    async (query?: string, silent = false) => {
+    async (query?: string, silent = false, locationOverride?: string) => {
+      const effectiveLocation = locationOverride ?? branchLocation;
       if (!silent) {
         setItemsRefreshing(true);
       }
@@ -246,14 +249,14 @@ export const usePosSale = () => {
         if (query?.trim()) {
           const result = await salesService.searchItems(
             query.trim(),
-            POS_CATALOG_LOCATION,
+            effectiveLocation || undefined,
           );
           setItems(result.items);
           syncBatchItemIds(result.items);
           if (result.parsed_qty && result.items.length === 1) {
             const { displayItems: merged } = mergePosCatalogAcrossBranches(
               result.items,
-              branchLocation,
+              effectiveLocation,
             );
             const match = merged[0] ?? result.items[0];
             return { autoQty: result.parsed_qty, item: match };
@@ -263,7 +266,7 @@ export const usePosSale = () => {
 
         const result = await inventoryService.list({
           for_pos_sale: true,
-          location: POS_CATALOG_LOCATION,
+          location: effectiveLocation || undefined,
         });
         setItems(result.items);
         syncBatchItemIds(result.items);
@@ -306,9 +309,16 @@ export const usePosSale = () => {
     }
   }, [loadCategories, loadCustomers, loadItems]);
 
+  // Intentionally run once on mount, not on every refreshContext identity
+  // change — refreshContext is recreated whenever branchLocation changes
+  // (via loadItems' dependency on it), and re-running this effect on that
+  // recreation used to call refreshContext() again, which resets `location`
+  // back to the server's default — silently reverting a just-picked branch
+  // (e.g. a lorry) back to "Main Location".
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     refreshContext();
-  }, [refreshContext]);
+  }, []);
 
   // Pre-fill the route gate with whichever route was picked last on this device.
   useEffect(() => {
@@ -349,6 +359,17 @@ export const usePosSale = () => {
     void lastRouteStorage.save(route);
   }, [route]);
 
+  // Undoes lockRouteSelection when the cashier backs out of a sale before
+  // adding anything to the cart (e.g. switches to another tab) — otherwise
+  // the route/customer gate would stay hidden even though no sale is
+  // actually in progress, and it wouldn't show again next time they land on
+  // an empty Sales screen.
+  const unlockRouteSelectionIfCartEmpty = useCallback(() => {
+    if (cart.length === 0) {
+      setRouteLocked(false);
+    }
+  }, [cart.length]);
+
   const syncPosData = useCallback(
     async (silent: boolean) => {
       if (!branchLocation) {
@@ -382,12 +403,18 @@ export const usePosSale = () => {
       setLocation(loc);
       setCart([]);
       setSearchQuery('');
-      if (categories.length > 0) {
-        setCategoryId(categories[0].id);
-      }
       setSubCategoryId('all');
+      // Items/categories are fetched scoped to the branch, so switching
+      // branches needs its own immediate refetch — passing `loc` directly
+      // (instead of relying on the branchLocation state, which hasn't
+      // updated yet in this closure) avoids fetching the old branch's data
+      // and leaving stale items on screen until the next background sync.
+      // loadCategories resets categoryId/subCategoryId itself once the new
+      // branch's categories arrive.
+      void loadCategories(loc);
+      void loadItems(undefined, false, loc);
     },
-    [categories],
+    [loadCategories, loadItems],
   );
 
   const { displayItems: catalogItems } = useMemo(
@@ -409,12 +436,7 @@ export const usePosSale = () => {
     }
   }, [items]);
 
-  const catalogScopeLabel = useMemo(() => {
-    if (locations.length > 1) {
-      return `All branches (${locations.length})`;
-    }
-    return 'All locations';
-  }, [locations.length]);
+  const catalogScopeLabel = useMemo(() => branchLocation || 'All locations', [branchLocation]);
 
   const resolveSaleItem = useCallback(
     (displayItem: InventoryItem) =>
@@ -2421,6 +2443,7 @@ export const usePosSale = () => {
     routeLocked,
     selectRoute,
     lockRouteSelection,
+    unlockRouteSelectionIfCartEmpty,
     routeOptions,
     categories,
     categoryId,

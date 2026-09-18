@@ -48,6 +48,16 @@ export const SalesScreen: React.FC = () => {
     }
   }, [posError, setPosError, showError]);
 
+  // Leaving the Sales tab before adding anything to the cart means no sale
+  // is actually in progress — undo the route lock from "Start Sale" so the
+  // gate popup shows again next time this tab is focused with an empty cart.
+  const { unlockRouteSelectionIfCartEmpty } = pos;
+  useEffect(() => {
+    if (!isFocused) {
+      unlockRouteSelectionIfCartEmpty();
+    }
+  }, [isFocused, unlockRouteSelectionIfCartEmpty]);
+
   const selectedCount = useMemo(
     () => pos.cart.reduce((n, line) => n + line.qty, 0),
     [pos.cart],
@@ -81,29 +91,17 @@ export const SalesScreen: React.FC = () => {
   // Gated on isFocused too — the Sales tab mounts in the background as soon as
   // the app starts (it's the tab navigator's initial route and tabs stay
   // mounted when you switch away), so without this the popup could fire
-  // silently before the user ever taps "New Sale".
-  const shouldShowStartSaleGate =
+  // silently before the user ever taps "New Sale". Recomputed fresh on every
+  // render so it reliably reappears each time you return to an empty-cart
+  // Sales screen — it only ever closes via pos.routeLocked (set by
+  // "Start Sale"), pos.isReturn, or the cart no longer being empty, never as
+  // a side effect of picking a field inside the popup itself.
+  const gateOpen =
     isFocused &&
     !pos.isReturn &&
     !pos.loading &&
     pos.cart.length === 0 &&
     !pos.routeLocked;
-
-  // Picking a field inside the gate (Location/Route/Customer) only updates
-  // that field's value — it must never dismiss the popup. Only pressing
-  // "Start Sale" (which locks the route via pos.lockRouteSelection) should
-  // close it. Driving visibility off a ref that's set once when the gate
-  // should first appear — instead of recomputing it inline on every
-  // render — keeps a field selection's own re-render from ever being
-  // mistaken for a close.
-  const [gateOpen, setGateOpen] = useState(false);
-  useEffect(() => {
-    if (shouldShowStartSaleGate) {
-      setGateOpen(true);
-    } else if (pos.routeLocked || pos.isReturn || pos.cart.length > 0) {
-      setGateOpen(false);
-    }
-  }, [shouldShowStartSaleGate, pos.routeLocked, pos.isReturn, pos.cart.length]);
 
   const openOrder = () => {
     if (

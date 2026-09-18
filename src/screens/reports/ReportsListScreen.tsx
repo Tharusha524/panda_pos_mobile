@@ -12,6 +12,7 @@ import {
   Receipt,
   RotateCcw,
   ShoppingBag,
+  Truck,
   TrendingUp,
   Users,
   Wallet,
@@ -37,6 +38,7 @@ type ReportSection = {
   items: Array<
     | { kind: 'report'; id: SystemReportType }
     | { kind: 'category'; id: 'finance'; title: string; subtitle: string }
+    | { kind: 'day_end'; title: string; subtitle: string }
   >;
 };
 
@@ -65,6 +67,11 @@ const REPORT_SECTIONS: ReportSection[] = [
       { kind: 'report', id: 'item_report' },
       { kind: 'report', id: 'reorder' },
       { kind: 'report', id: 'expiry_report' },
+      {
+        kind: 'day_end',
+        title: 'Day End Report',
+        subtitle: 'Start stock, sold, and remaining by lorry',
+      },
     ],
   },
   {
@@ -138,6 +145,19 @@ export const ReportsListScreen: React.FC = () => {
                 borderColor="$borderLight300"
                 overflow="hidden">
                 {section.items.map(item => {
+                  if (item.kind === 'day_end') {
+                    return (
+                      <SettingsRow
+                        key={item.title}
+                        icon={Truck}
+                        iconColor={colors.text}
+                        iconBg={colors.pastelGreen}
+                        title={item.title}
+                        subtitle={item.subtitle}
+                        onPress={() => navigation.navigate('DayEndReport')}
+                      />
+                    );
+                  }
                   if (item.kind === 'category') {
                     const visual = REPORT_ICONS[item.id] ?? defaultVisual;
                     return (
