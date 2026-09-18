@@ -1,12 +1,14 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   KeyboardAvoidingView,
+  Linking,
   Platform,
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
   Keyboard,
   StyleSheet,
+  View,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
@@ -14,7 +16,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ScrollView } from 'react-native-gesture-handler';
 import { Box, HStack, Text, VStack } from '@gluestack-ui/themed';
-import { MapPin, Navigation } from 'lucide-react-native';
+import { MapPin, Navigation, Phone } from 'lucide-react-native';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { AppHeader } from '@/components/common/AppHeader';
@@ -201,6 +203,17 @@ export const CustomerFormScreen: React.FC = () => {
     });
   };
 
+  const handleCallContact = async () => {
+    const digits = contactNo.trim();
+    if (!digits) return;
+    const url = `tel:${digits}`;
+    try {
+      await Linking.openURL(url);
+    } catch (e) {
+      showErrorFromUnknown(e, 'Call customer');
+    }
+  };
+
   const handleCaptureLocation = async () => {
     setCapturingLocation(true);
     try {
@@ -307,16 +320,25 @@ export const CustomerFormScreen: React.FC = () => {
               />
 
               <Label>Contact number *</Label>
-              <TextInput
-                value={contactNo}
-                onChangeText={setContactNo}
-                style={appInputStyle}
-                placeholder="Phone number"
-                placeholderTextColor={appInputPlaceholderColor}
-                keyboardType="phone-pad"
-                editable={!submitting}
-                onFocus={scrollToFocusedField}
-              />
+              <View style={styles.contactRow}>
+                <TextInput
+                  value={contactNo}
+                  onChangeText={setContactNo}
+                  style={[appInputStyle, styles.contactInput]}
+                  placeholder="Phone number"
+                  placeholderTextColor={appInputPlaceholderColor}
+                  keyboardType="phone-pad"
+                  editable={!submitting}
+                  onFocus={scrollToFocusedField}
+                />
+                <TouchableOpacity
+                  onPress={handleCallContact}
+                  disabled={!contactNo.trim()}
+                  style={[styles.callButton, !contactNo.trim() && styles.callButtonDisabled]}
+                  accessibilityLabel="Call customer">
+                  <Phone size={20} color={contactNo.trim() ? colors.white : colors.textMuted} />
+                </TouchableOpacity>
+              </View>
 
               <Label>Email</Label>
               <TextInput
@@ -444,6 +466,25 @@ export const CustomerFormScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  contactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  contactInput: {
+    flex: 1,
+  },
+  callButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+  },
+  callButtonDisabled: {
+    backgroundColor: colors.border,
+  },
   scroll: {
     flexGrow: 1,
     paddingTop: 4,

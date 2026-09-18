@@ -8,10 +8,12 @@ import {
   View,
 } from 'react-native';
 import { Box, Pressable as GsPressable, Text } from '@gluestack-ui/themed';
-import { ChevronRight, Package, Search, X } from 'lucide-react-native';
+import { ChevronRight, MapPin, Package, Search, X } from 'lucide-react-native';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import { ReportDatePickerField } from '@/components/inputs/ReportDatePickerField';
+import { SelectionModal, type SelectionOption } from '@/components/common/SelectionModal';
 import { inventoryService } from '@/services/api/inventoryService';
+import { stockTransferService } from '@/services/api/stockTransferService';
 import type { ReportDatePresetId, ReportFilterParams } from '@/types/reportFilters';
 import type { InventoryItem } from '@/types/sales';
 import {
@@ -38,6 +40,8 @@ type Props = {
   /** Hide the Item section for reports where it has no effect on the data
    * (see reportFilterCapabilities). Defaults to shown. */
   showItemFilter?: boolean;
+  /** Hide the Branch/location section. Defaults to shown. */
+  showLocationFilter?: boolean;
 };
 
 const itemLabelFor = (item: InventoryItem): string => {
@@ -51,6 +55,7 @@ export const ReportFilterBar: React.FC<Props> = ({
   onChange,
   showDateFilter = true,
   showItemFilter = true,
+  showLocationFilter = true,
 }) => {
   const [datePreset, setDatePreset] = useState(() =>
     detectDatePreset(filters.dateFrom, filters.dateTo),
@@ -59,6 +64,29 @@ export const ReportFilterBar: React.FC<Props> = ({
   const [itemsLoading, setItemsLoading] = useState(false);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [itemSearch, setItemSearch] = useState('');
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+  const [locations, setLocations] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!showLocationFilter) return;
+    stockTransferService
+      .context()
+      .then(ctx => setLocations(ctx.locations ?? []))
+      .catch(() => setLocations([]));
+  }, [showLocationFilter]);
+
+  const locationOptions: SelectionOption[] = useMemo(
+    () => [
+      { id: 'all', label: 'All branches' },
+      ...locations.map(loc => ({ id: loc, label: loc })),
+    ],
+    [locations],
+  );
+
+  const selectLocation = (loc: string) => {
+    onChange({ ...filters, location: loc });
+    setLocationPickerOpen(false);
+  };
 
   useEffect(() => {
     setDatePreset(detectDatePreset(filters.dateFrom, filters.dateTo));
@@ -133,7 +161,7 @@ export const ReportFilterBar: React.FC<Props> = ({
     setItemSearch('');
   };
 
-  if (!showDateFilter && !showItemFilter) {
+  if (!showDateFilter && !showItemFilter && !showLocationFilter) {
     return null;
   }
 
@@ -262,7 +290,42 @@ export const ReportFilterBar: React.FC<Props> = ({
             </Pressable>
           </Box>
         ) : null}
+
+        {showLocationFilter && locations.length > 1 ? (
+          <Box mt={showDateFilter || showItemFilter ? '$3' : '$0'}>
+            <Text
+              size="xs"
+              fontWeight="$bold"
+              color={colors.textSecondary}
+              mb="$1.5"
+              textTransform="uppercase"
+              letterSpacing={0.5}>
+              Branch
+            </Text>
+            <Pressable
+              onPress={() => setLocationPickerOpen(true)}
+              style={styles.itemSelectRow}
+              accessibilityRole="button"
+              accessibilityLabel={
+                filters.location !== 'all' ? `Branch ${filters.location}` : 'All branches'
+              }>
+              <MapPin size={16} color={colors.primary} />
+              <Text style={styles.itemSelectText} numberOfLines={1}>
+                {filters.location !== 'all' ? filters.location : 'All branches'}
+              </Text>
+              <ChevronRight size={16} color={colors.primaryLight} />
+            </Pressable>
+          </Box>
+        ) : null}
       </Box>
+
+      <SelectionModal
+        visible={locationPickerOpen}
+        title="Select branch"
+        options={locationOptions}
+        onSelect={opt => selectLocation(opt.id)}
+        onClose={() => setLocationPickerOpen(false)}
+      />
 
       <Modal
         visible={itemPickerOpen}

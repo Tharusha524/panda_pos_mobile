@@ -10,6 +10,9 @@ import type { CustomerSummary } from '@/types/sales';
 
 interface StartSaleGateModalProps {
   visible: boolean;
+  locationOptions: string[];
+  location: string;
+  onSelectLocation: (location: string) => void;
   routeOptions: string[];
   route: string | null;
   onSelectRoute: (route: string | null) => void;
@@ -33,6 +36,9 @@ interface StartSaleGateModalProps {
  */
 export const StartSaleGateModal: React.FC<StartSaleGateModalProps> = ({
   visible,
+  locationOptions,
+  location,
+  onSelectLocation,
   routeOptions,
   route,
   onSelectRoute,
@@ -43,6 +49,7 @@ export const StartSaleGateModal: React.FC<StartSaleGateModalProps> = ({
   onConfirm,
   currency,
 }) => {
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [routePickerOpen, setRoutePickerOpen] = useState(false);
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
 
@@ -82,6 +89,36 @@ export const StartSaleGateModal: React.FC<StartSaleGateModalProps> = ({
           <Text size="sm" color={colors.textMuted} mb="$4">
             Select the route and customer for this sale.
           </Text>
+
+          {locationOptions.length > 1 ? (
+            <Pressable
+              onPress={() => setLocationPickerOpen(true)}
+              flexDirection="row"
+              alignItems="center"
+              justifyContent="space-between"
+              borderWidth={1}
+              borderColor={colors.primaryMuted}
+              borderRadius="$xl"
+              px="$3"
+              py="$3"
+              bg={colors.backgroundAlt}
+              mb="$3">
+              <HStack alignItems="center" gap="$2" flex={1}>
+                <Box bg={colors.primarySoft} p="$1.5" borderRadius="$full">
+                  <MapPin size={16} color={colors.primary} />
+                </Box>
+                <VStack>
+                  <Text size="xs" color={colors.textMuted}>
+                    Location
+                  </Text>
+                  <Text fontWeight="$semibold" color={colors.text}>
+                    {location || 'Select location'}
+                  </Text>
+                </VStack>
+              </HStack>
+              <ChevronRight size={16} color={colors.primaryLight} />
+            </Pressable>
+          ) : null}
 
           {routeOptions.length > 0 ? (
             <Pressable
@@ -144,6 +181,15 @@ export const StartSaleGateModal: React.FC<StartSaleGateModalProps> = ({
           <PrimaryButton label="Start Sale" onPress={onConfirm} />
         </Box>
       </View>
+
+      <SelectionModal
+        visible={locationPickerOpen}
+        title="Select location"
+        options={locationOptions.map(loc => ({ id: loc, label: loc }))}
+        onSelect={opt => onSelectLocation(opt.id)}
+        onClose={() => setLocationPickerOpen(false)}
+        emptyMessage="No locations"
+      />
 
       <SelectionModal
         visible={routePickerOpen}

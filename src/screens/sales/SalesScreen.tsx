@@ -82,12 +82,28 @@ export const SalesScreen: React.FC = () => {
   // the app starts (it's the tab navigator's initial route and tabs stay
   // mounted when you switch away), so without this the popup could fire
   // silently before the user ever taps "New Sale".
-  const showStartSaleGate =
+  const shouldShowStartSaleGate =
     isFocused &&
     !pos.isReturn &&
     !pos.loading &&
     pos.cart.length === 0 &&
     !pos.routeLocked;
+
+  // Picking a field inside the gate (Location/Route/Customer) only updates
+  // that field's value — it must never dismiss the popup. Only pressing
+  // "Start Sale" (which locks the route via pos.lockRouteSelection) should
+  // close it. Driving visibility off a ref that's set once when the gate
+  // should first appear — instead of recomputing it inline on every
+  // render — keeps a field selection's own re-render from ever being
+  // mistaken for a close.
+  const [gateOpen, setGateOpen] = useState(false);
+  useEffect(() => {
+    if (shouldShowStartSaleGate) {
+      setGateOpen(true);
+    } else if (pos.routeLocked || pos.isReturn || pos.cart.length > 0) {
+      setGateOpen(false);
+    }
+  }, [shouldShowStartSaleGate, pos.routeLocked, pos.isReturn, pos.cart.length]);
 
   const openOrder = () => {
     if (
@@ -288,7 +304,10 @@ export const SalesScreen: React.FC = () => {
       />
 
       <StartSaleGateModal
-        visible={showStartSaleGate}
+        visible={gateOpen}
+        locationOptions={pos.locations}
+        location={pos.location}
+        onSelectLocation={pos.selectLocation}
         routeOptions={pos.routeOptions}
         route={pos.route}
         onSelectRoute={pos.selectRoute}

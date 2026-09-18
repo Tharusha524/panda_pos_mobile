@@ -3,6 +3,8 @@ export interface ReportFilterParams {
   dateTo: string;
   itemId: number | null;
   itemLabel: string | null;
+  /** Branch/location to scope the report to, or 'all' for every branch combined. */
+  location: string;
 }
 
 export type ReportDatePresetId =

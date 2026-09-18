@@ -48,6 +48,7 @@ export const defaultReportFilters = (): ReportFilterParams => ({
   ...defaultReportDateRange(),
   itemId: null,
   itemLabel: null,
+  location: 'all',
 });
 
 export const REPORT_DATE_PRESETS: ReportDatePreset[] = [

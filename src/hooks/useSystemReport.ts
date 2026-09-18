@@ -49,6 +49,7 @@ export const useSystemReport = (type: SystemReportType, filters: ReportFilterPar
             dateFrom: filters.dateFrom,
             dateTo: filters.dateTo,
             itemId: filters.itemId,
+            location: filters.location,
           });
           setResult({ source: 'backend', report });
         }
@@ -60,7 +61,7 @@ export const useSystemReport = (type: SystemReportType, filters: ReportFilterPar
         setRefreshing(false);
       }
     },
-    [filters.dateFrom, filters.dateTo, filters.itemId, settings, type],
+    [filters.dateFrom, filters.dateTo, filters.itemId, filters.location, settings, type],
   );
 
   useEffect(() => {
