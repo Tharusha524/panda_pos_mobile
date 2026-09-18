@@ -8,10 +8,12 @@ import {
   View,
 } from 'react-native';
 import { Box, Pressable as GsPressable, Text } from '@gluestack-ui/themed';
-import { ChevronRight, Package, Search, X } from 'lucide-react-native';
+import { ChevronRight, MapPin, Package, Search, X } from 'lucide-react-native';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import { ReportDatePickerField } from '@/components/inputs/ReportDatePickerField';
+import { SelectionModal, type SelectionOption } from '@/components/common/SelectionModal';
 import { inventoryService } from '@/services/api/inventoryService';
+import { stockTransferService } from '@/services/api/stockTransferService';
 import type { ReportDatePresetId, ReportFilterParams } from '@/types/reportFilters';
 import type { InventoryItem } from '@/types/sales';
 import {
@@ -32,6 +34,14 @@ import {
 type Props = {
   filters: ReportFilterParams;
   onChange: (next: ReportFilterParams) => void;
+  /** Hide the Date range section for reports where it has no effect on the
+   * data (see reportFilterCapabilities). Defaults to shown. */
+  showDateFilter?: boolean;
+  /** Hide the Item section for reports where it has no effect on the data
+   * (see reportFilterCapabilities). Defaults to shown. */
+  showItemFilter?: boolean;
+  /** Hide the Branch/location section. Defaults to shown. */
+  showLocationFilter?: boolean;
 };
 
 const itemLabelFor = (item: InventoryItem): string => {
@@ -40,7 +50,13 @@ const itemLabelFor = (item: InventoryItem): string => {
   return number ? `${number} — ${description}` : description;
 };
 
-export const ReportFilterBar: React.FC<Props> = ({ filters, onChange }) => {
+export const ReportFilterBar: React.FC<Props> = ({
+  filters,
+  onChange,
+  showDateFilter = true,
+  showItemFilter = true,
+  showLocationFilter = true,
+}) => {
   const [datePreset, setDatePreset] = useState(() =>
     detectDatePreset(filters.dateFrom, filters.dateTo),
   );
@@ -48,6 +64,29 @@ export const ReportFilterBar: React.FC<Props> = ({ filters, onChange }) => {
   const [itemsLoading, setItemsLoading] = useState(false);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [itemSearch, setItemSearch] = useState('');
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+  const [locations, setLocations] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!showLocationFilter) return;
+    stockTransferService
+      .context()
+      .then(ctx => setLocations(ctx.locations ?? []))
+      .catch(() => setLocations([]));
+  }, [showLocationFilter]);
+
+  const locationOptions: SelectionOption[] = useMemo(
+    () => [
+      { id: 'all', label: 'All branches' },
+      ...locations.map(loc => ({ id: loc, label: loc })),
+    ],
+    [locations],
+  );
+
+  const selectLocation = (loc: string) => {
+    onChange({ ...filters, location: loc });
+    setLocationPickerOpen(false);
+  };
 
   useEffect(() => {
     setDatePreset(detectDatePreset(filters.dateFrom, filters.dateTo));
@@ -122,6 +161,10 @@ export const ReportFilterBar: React.FC<Props> = ({ filters, onChange }) => {
     setItemSearch('');
   };
 
+  if (!showDateFilter && !showItemFilter && !showLocationFilter) {
+    return null;
+  }
+
   return (
     <>
       <Box
@@ -144,104 +187,145 @@ export const ReportFilterBar: React.FC<Props> = ({ filters, onChange }) => {
           Report filters
         </Text>
 
-        <Text
-          size="xs"
-          fontWeight="$bold"
-          color={colors.textSecondary}
-          mb="$1.5"
-          textTransform="uppercase"
-          letterSpacing={0.5}>
-          Date range
-        </Text>
-        <SmoothScrollView
-          horizontal
-          contentPaddingBottom={0}
-          {...smoothHorizontalScrollProps}>
-          <Box flexDirection="row" gap="$2" py="$1" mb="$1">
-            {REPORT_DATE_PRESETS.map(preset => {
-              const active = datePreset === preset.id;
-              return (
-                <GsPressable
-                  key={preset.id}
-                  onPress={() => applyDatePreset(preset.id)}
-                  px="$4"
-                  py="$2.5"
-                  borderRadius="$full"
-                  borderWidth={active ? 0 : 1}
-                  borderColor={colors.border}
-                  bg={active ? colors.primary : colors.white}
-                  style={active ? shadows.sm : undefined}>
-                  <Text
-                    size="xs"
-                    fontWeight="$bold"
-                    fontFamily={typography.label.fontFamily}
-                    color={active ? colors.textOnPrimary : colors.textSecondary}>
-                    {preset.label}
-                  </Text>
-                </GsPressable>
-              );
-            })}
-          </Box>
-        </SmoothScrollView>
-
-        <Box flexDirection="row" gap="$3" mt="$3">
-          <Box flex={1}>
-            <ReportDatePickerField
-              label="From"
-              value={filters.dateFrom}
-              onChange={value => updateDate('dateFrom', value)}
-              placeholder="Start date"
-            />
-          </Box>
-          <Box flex={1}>
-            <ReportDatePickerField
-              label="To"
-              value={filters.dateTo}
-              onChange={value => updateDate('dateTo', value)}
-              placeholder="End date"
-            />
-          </Box>
-        </Box>
-
-        <Box mt="$3">
-          <Text
-            size="xs"
-            fontWeight="$bold"
-            color={colors.textSecondary}
-            mb="$1.5"
-            textTransform="uppercase"
-            letterSpacing={0.5}>
-            Item
-          </Text>
-          <Pressable
-            onPress={() => setItemPickerOpen(true)}
-            style={styles.itemSelectRow}
-            accessibilityRole="button"
-            accessibilityLabel={
-              filters.itemLabel ? `Item ${filters.itemLabel}` : 'All items'
-            }>
-            <Package size={16} color={colors.primary} />
+        {showDateFilter ? (
+          <>
             <Text
-              style={[
-                styles.itemSelectText,
-                !filters.itemLabel && styles.itemSelectPlaceholder,
-              ]}
-              numberOfLines={2}>
-              {filters.itemLabel ?? 'All items'}
+              size="xs"
+              fontWeight="$bold"
+              color={colors.textSecondary}
+              mb="$1.5"
+              textTransform="uppercase"
+              letterSpacing={0.5}>
+              Date range
             </Text>
-            {filters.itemId ? (
-              <TouchableOpacity
-                onPress={() => selectItem(null)}
-                hitSlop={8}
-                accessibilityLabel="Clear item filter">
-                <X size={14} color={colors.textMuted} />
-              </TouchableOpacity>
-            ) : (
+            <SmoothScrollView
+              horizontal
+              contentPaddingBottom={0}
+              {...smoothHorizontalScrollProps}>
+              <Box flexDirection="row" gap="$2" py="$1" mb="$1">
+                {REPORT_DATE_PRESETS.map(preset => {
+                  const active = datePreset === preset.id;
+                  return (
+                    <GsPressable
+                      key={preset.id}
+                      onPress={() => applyDatePreset(preset.id)}
+                      px="$4"
+                      py="$2.5"
+                      borderRadius="$full"
+                      borderWidth={active ? 0 : 1}
+                      borderColor={colors.border}
+                      bg={active ? colors.primary : colors.white}
+                      style={active ? shadows.sm : undefined}>
+                      <Text
+                        size="xs"
+                        fontWeight="$bold"
+                        fontFamily={typography.label.fontFamily}
+                        color={active ? colors.textOnPrimary : colors.textSecondary}>
+                        {preset.label}
+                      </Text>
+                    </GsPressable>
+                  );
+                })}
+              </Box>
+            </SmoothScrollView>
+
+            <Box flexDirection="row" gap="$3" mt="$3">
+              <Box flex={1}>
+                <ReportDatePickerField
+                  label="From"
+                  value={filters.dateFrom}
+                  onChange={value => updateDate('dateFrom', value)}
+                  placeholder="Start date"
+                />
+              </Box>
+              <Box flex={1}>
+                <ReportDatePickerField
+                  label="To"
+                  value={filters.dateTo}
+                  onChange={value => updateDate('dateTo', value)}
+                  placeholder="End date"
+                />
+              </Box>
+            </Box>
+          </>
+        ) : null}
+
+        {showItemFilter ? (
+          <Box mt={showDateFilter ? '$3' : '$0'}>
+            <Text
+              size="xs"
+              fontWeight="$bold"
+              color={colors.textSecondary}
+              mb="$1.5"
+              textTransform="uppercase"
+              letterSpacing={0.5}>
+              Item
+            </Text>
+            <Pressable
+              onPress={() => setItemPickerOpen(true)}
+              style={styles.itemSelectRow}
+              accessibilityRole="button"
+              accessibilityLabel={
+                filters.itemLabel ? `Item ${filters.itemLabel}` : 'All items'
+              }>
+              <Package size={16} color={colors.primary} />
+              <Text
+                style={[
+                  styles.itemSelectText,
+                  !filters.itemLabel && styles.itemSelectPlaceholder,
+                ]}
+                numberOfLines={2}>
+                {filters.itemLabel ?? 'All items'}
+              </Text>
+              {filters.itemId ? (
+                <TouchableOpacity
+                  onPress={() => selectItem(null)}
+                  hitSlop={8}
+                  accessibilityLabel="Clear item filter">
+                  <X size={14} color={colors.textMuted} />
+                </TouchableOpacity>
+              ) : (
+                <ChevronRight size={16} color={colors.primaryLight} />
+              )}
+            </Pressable>
+          </Box>
+        ) : null}
+
+        {showLocationFilter && locations.length > 1 ? (
+          <Box mt={showDateFilter || showItemFilter ? '$3' : '$0'}>
+            <Text
+              size="xs"
+              fontWeight="$bold"
+              color={colors.textSecondary}
+              mb="$1.5"
+              textTransform="uppercase"
+              letterSpacing={0.5}>
+              Branch
+            </Text>
+            <Pressable
+              onPress={() => setLocationPickerOpen(true)}
+              style={styles.itemSelectRow}
+              accessibilityRole="button"
+              accessibilityLabel={
+                filters.location !== 'all' ? `Branch ${filters.location}` : 'All branches'
+              }>
+              <MapPin size={16} color={colors.primary} />
+              <Text style={styles.itemSelectText} numberOfLines={1}>
+                {filters.location !== 'all' ? filters.location : 'All branches'}
+              </Text>
               <ChevronRight size={16} color={colors.primaryLight} />
-            )}
-          </Pressable>
-        </Box>
+            </Pressable>
+          </Box>
+        ) : null}
       </Box>
+
+      <SelectionModal
+        visible={locationPickerOpen}
+        title="Select branch"
+        options={locationOptions}
+        onSelect={opt => selectLocation(opt.id)}
+        onClose={() => setLocationPickerOpen(false)}
+      />
 
       <Modal
         visible={itemPickerOpen}

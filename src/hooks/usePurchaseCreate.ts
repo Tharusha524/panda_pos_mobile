@@ -396,7 +396,12 @@ export const usePurchaseCreate = () => {
           discount: 0,
           amount: committedSubTotal,
           payment_method: payment.payment_method,
-          bank_id: payment.bank_id,
+          // This screen's bank field is free text (bankAsFreeText on
+          // PaymentMethodDetails), not a picker over real registered banks —
+          // belongs in bank_name, not the numeric bank_id (same fix as the
+          // sales checkout bank_name bug).
+          bank_id: null,
+          bank_name: payment.bank_id ? String(payment.bank_id).trim() || null : null,
           cheque_number: payment.cheque_number,
           notes: payment.notes,
           purchase_date: purchaseDate,

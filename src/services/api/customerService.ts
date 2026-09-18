@@ -1,7 +1,10 @@
 import { apiClient } from '@/services/api/client';
 import type { ApiSuccessResponse } from '@/types/auth';
 import type {
+  ChequeReturnResult,
   CustomerPayload,
+  CustomerPaymentRecord,
+  OutstandingBill,
   ReceivePaymentPayload,
   ReceivePaymentResult,
 } from '@/types/customers';
@@ -100,6 +103,56 @@ export const customerService = {
       ...data.data,
       customer: normalizeCustomer(data.data.customer),
     };
+  },
+
+  /** That customer's still-unpaid credit bills, oldest first — for the
+   * Receive Payment "which bill" picker. */
+  async outstandingBills(id: number): Promise<OutstandingBill[]> {
+    const { data } = await apiClient.get<ApiSuccessResponse<OutstandingBill[]>>(
+      `/customers/${id}/outstanding-bills`,
+    );
+    if (!data.success) {
+      throw new Error(data.message ?? 'Failed to load outstanding bills');
+    }
+    return data.data ?? [];
+  },
+
+  /** "Receive payment" records for a customer — for Customer History, which
+   * otherwise only lists their sales. */
+  async payments(id: number): Promise<CustomerPaymentRecord[]> {
+    const { data } = await apiClient.get<ApiSuccessResponse<CustomerPaymentRecord[]>>(
+      `/customers/${id}/payments`,
+    );
+    if (!data.success) {
+      throw new Error(data.message ?? 'Failed to load customer payments');
+    }
+    return data.data ?? [];
+  },
+
+  /** Marks a payment as returned (e.g. a bounced cheque) — reverses it:
+   * restores the customer's balance and frees up whichever bill it was
+   * allocated to, if any. */
+  async returnPayment(id: number, paymentId: number): Promise<ChequeReturnResult> {
+    const { data } = await apiClient.post<ApiSuccessResponse<ChequeReturnResult>>(
+      `/customers/${id}/payments/${paymentId}/return`,
+    );
+    if (!data.success || !data.data) {
+      throw new Error(data.message ?? 'Failed to mark payment as returned');
+    }
+    return { ...data.data, customer: normalizeCustomer(data.data.customer) };
+  },
+
+  /** Marks a sale-time cheque as returned (bounced) — the sale itself
+   * (items, inventory, totals) is untouched; only its amount is added back
+   * to the customer's balance as credit owed. */
+  async returnSaleCheque(id: number, saleId: number): Promise<ChequeReturnResult> {
+    const { data } = await apiClient.post<ApiSuccessResponse<ChequeReturnResult>>(
+      `/customers/${id}/sales/${saleId}/return-cheque`,
+    );
+    if (!data.success || !data.data) {
+      throw new Error(data.message ?? 'Failed to mark cheque as returned');
+    }
+    return { ...data.data, customer: normalizeCustomer(data.data.customer) };
   },
 
   async remove(id: number): Promise<void> {

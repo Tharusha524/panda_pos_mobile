@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import ViewShot, { type ViewShotRef } from 'react-native-view-shot';
@@ -20,6 +20,7 @@ import {
   shareReceiptImageFile,
 } from '@/utils/receiptImageShare';
 import { getReceiptPrintCustomization } from '@/utils/receiptPrintCustomization';
+import { customerService } from '@/services/api/customerService';
 import { TAB_BAR_SCROLL_PADDING } from '@/theme';
 import type { HomeStackParamList } from '@/navigation/types';
 
@@ -35,9 +36,32 @@ export const CustomerSaleReceiptScreen: React.FC = () => {
   const { showError, showConfirm } = useErrorDialog();
   const [printing, setPrinting] = useState(false);
   const [savingImage, setSavingImage] = useState(false);
+  const [customerOutstandingBalance, setCustomerOutstandingBalance] = useState<
+    number | null
+  >(null);
   const receiptShotRef = useRef<ViewShotRef>(null);
 
   const canPrint = bluetoothPrintService.isSupported();
+
+  useEffect(() => {
+    if (!params.customerId) {
+      return;
+    }
+    let cancelled = false;
+    customerService
+      .get(params.customerId)
+      .then(c => {
+        if (!cancelled) {
+          setCustomerOutstandingBalance(c.net_balance ?? null);
+        }
+      })
+      .catch(() => {
+        // Best-effort — the receipt still works fine without this line.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [params.customerId]);
 
   const promptPrinterSetup = (message: string) => {
     showConfirm({
@@ -102,7 +126,7 @@ export const CustomerSaleReceiptScreen: React.FC = () => {
         params.receipt,
         currency,
         settings,
-        undefined,
+        params.customerId,
         capturedImageBase64,
       );
     } catch (e) {
@@ -138,7 +162,11 @@ export const CustomerSaleReceiptScreen: React.FC = () => {
             ref={receiptShotRef}
             options={{ format: 'png', quality: 1, result: 'tmpfile' }}
             style={{ backgroundColor: '#fff' }}>
-            <SaleReceiptView receipt={params.receipt} settings={settings} />
+            <SaleReceiptView
+              receipt={params.receipt}
+              settings={settings}
+              customerOutstandingBalance={customerOutstandingBalance}
+            />
           </ViewShot>
         </View>
 

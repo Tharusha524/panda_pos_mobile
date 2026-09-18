@@ -3,6 +3,7 @@
  */
 
 import './src/polyfills/textDecoder';
+import './src/polyfills/buffer';
 import 'react-native-gesture-handler';
 import { AppRegistry } from 'react-native';
 import notifee from '@notifee/react-native';

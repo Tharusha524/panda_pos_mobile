@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   AlertTriangle,
   RotateCcw,
@@ -13,7 +13,7 @@ import type {
   TodayPurchaseRow,
   TodaySaleRow,
 } from '@/types/dashboard';
-import { TRANSACTION_TYPE_RETURN } from '@/types/sales';
+import { TRANSACTION_TYPE_EXCHANGE, TRANSACTION_TYPE_RETURN } from '@/types/sales';
 
 const StatusPill: React.FC<{
   label: string;
@@ -57,6 +57,7 @@ const RowCard: React.FC<{
   meta?: string;
   pill?: React.ReactNode;
   accent?: 'default' | 'warning' | 'return';
+  onPress?: () => void;
 }> = ({
   icon,
   iconBg,
@@ -67,8 +68,11 @@ const RowCard: React.FC<{
   meta,
   pill,
   accent = 'default',
+  onPress,
 }) => (
-  <View
+  <Pressable
+    disabled={!onPress}
+    onPress={onPress}
     style={[
       styles.card,
       shadows.sm,
@@ -105,13 +109,16 @@ const RowCard: React.FC<{
         </View>
       )}
     </View>
-  </View>
+  </Pressable>
 );
 
 export const TodaySalesList: React.FC<{
   rows: TodaySaleRow[];
   currency: string;
-}> = ({ rows, currency }) => {
+  /** Tapping a row opens that sale's real, printable receipt — not the
+   * whole-day summary this list itself sits under. */
+  onRowPress?: (row: TodaySaleRow) => void;
+}> = ({ rows, currency, onRowPress }) => {
   if (rows.length === 0) {
     return <EmptyState message="No sales recorded today yet." />;
   }
@@ -119,28 +126,33 @@ export const TodaySalesList: React.FC<{
     <View style={styles.list}>
       {rows.map(row => {
         const isReturn = row.transaction_type === TRANSACTION_TYPE_RETURN;
+        const isExchange = row.transaction_type === TRANSACTION_TYPE_EXCHANGE;
+        const isRefundDue = isExchange && row.amount < 0;
         const isHold = (row.status ?? '').toLowerCase() === 'hold';
         return (
           <RowCard
             key={row.id}
+            onPress={onRowPress ? () => onRowPress(row) : undefined}
             icon={<ShoppingCart size={18} color={colors.primary} strokeWidth={2.2} />}
             iconBg={colors.primarySoft}
             title={row.sales_id}
             subtitle={row.customer_name?.trim() || 'Walk-in Customer'}
-            amount={formatCurrency(row.amount, currency)}
-            amountColor={isReturn ? colors.error : colors.primary}
+            amount={formatCurrency(Math.abs(row.amount), currency)}
+            amountColor={isReturn || isRefundDue ? colors.error : colors.primary}
             meta={[row.location, row.time].filter(Boolean).join(' · ')}
-            accent={isReturn ? 'return' : 'default'}
+            accent={isReturn || isRefundDue ? 'return' : 'default'}
             pill={
               <StatusPill
                 label={
-                  isReturn
-                    ? 'Return'
-                    : isHold
-                      ? 'Hold'
-                      : row.payment_method?.trim() || 'Paid'
+                  isExchange
+                    ? 'Exchange'
+                    : isReturn
+                      ? 'Return'
+                      : isHold
+                        ? 'Hold'
+                        : row.payment_method?.trim() || 'Paid'
                 }
-                tone={isReturn ? 'return' : isHold ? 'hold' : 'sale'}
+                tone={isReturn || isRefundDue ? 'return' : isHold ? 'hold' : 'sale'}
               />
             }
           />
@@ -228,6 +240,9 @@ const styles = StyleSheet.create({
   cardReturn: {
     borderColor: colors.error,
     backgroundColor: colors.errorSoft,
+  },
+  cardPressed: {
+    opacity: 0.7,
   },
   iconWrap: {
     width: 40,

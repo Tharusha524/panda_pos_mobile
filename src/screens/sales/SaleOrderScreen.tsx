@@ -23,6 +23,7 @@ import { SaleOrderLineRow } from '@/components/sales/SaleOrderLineRow';
 import { FilterChips } from '@/components/common/FilterChips';
 import { PaymentMethodPicker } from '@/components/sales/PaymentMethodPicker';
 import { PaymentMethodDetails } from '@/components/sales/PaymentMethodDetails';
+import { SplitPaymentEditor, type SplitPaymentRow } from '@/components/sales/SplitPaymentEditor';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSaleContext } from '@/context/PosSaleContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
@@ -31,6 +32,7 @@ import { refundCardStorage } from '@/services/storage/refundCardStorage';
 import { isInvalidHoldPinError } from '@/services/storage/holdPinStorage';
 import { useSavedHoldPin } from '@/hooks/useSavedHoldPin';
 import { formatCurrency } from '@/utils/format';
+import { formatDateYmd } from '@/utils/reportDateFilters';
 import { cartLineKey, itemHasBatches } from '@/utils/batchUtils';
 import {
   buildPaymentNotes,
@@ -41,7 +43,14 @@ import {
   needsPaymentReference,
   resolveCreditPaymentMethod,
 } from '@/utils/paymentMethod';
-import type { CartLine, SaleReceiptPayload } from '@/types/sales';
+import {
+  TRANSACTION_TYPE_EXCHANGE,
+  TRANSACTION_TYPE_RETURN,
+  TRANSACTION_TYPE_SALE,
+  type CartLine,
+  type ReceiptLine,
+  type SaleReceiptPayload,
+} from '@/types/sales';
 import {
   colors,
   appInputStyle,
@@ -54,6 +63,13 @@ import type { SalesStackParamList } from '@/navigation/types';
 type Nav = NativeStackNavigationProp<SalesStackParamList, 'SaleOrder'>;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+// cartLineKey() alone (item + batch) collides for Exchange mode, where a sale
+// line and a return line can share the same item/batch — that shared key was
+// causing the qty/price draft state (and the list's React key) for one line
+// to bleed into the other. Suffix with direction so every line here is unique.
+const orderLineKey = (line: CartLine): string =>
+  `${cartLineKey(line.item_id, line.item_batch_id)}:${line.line_direction ?? 'sale'}`;
 
 const parseDraftQty = (raw: string | undefined): number | null => {
   if (raw == null) {
@@ -88,13 +104,15 @@ export const SaleOrderScreen: React.FC = () => {
   const { error: posError, setError: setPosError } = pos;
 
   const [customerModal, setCustomerModal] = useState(false);
-  const [routeModal, setRouteModal] = useState(false);
-  const [routeFilter, setRouteFilter] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState(pos.paymentMethod);
   const [amountReceived, setAmountReceived] = useState('');
   const banks: BankAccount[] = [];
   const [bankId, setBankId] = useState<number | string | null>('');
   const [chequeNumber, setChequeNumber] = useState('');
+  // Split payment (part cash, part cheque, part credit, etc. on one sale) —
+  // plain-sale checkout only, not returns/exchanges/credit-account refunds.
+  const [splitPayment, setSplitPayment] = useState(false);
+  const [splitRows, setSplitRows] = useState<SplitPaymentRow[]>([]);
   const [originalSaleId, setOriginalSaleId] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [paymentCardLast4, setPaymentCardLast4] = useState('');
@@ -132,7 +150,7 @@ export const SaleOrderScreen: React.FC = () => {
 
   const getEffectiveQty = useCallback(
     (line: CartLine): number => {
-      const key = cartLineKey(line.item_id, line.item_batch_id);
+      const key = orderLineKey(line);
       const parsed = parseDraftQty(qtyDrafts[key]);
       if (parsed !== null && parsed > 0) {
         return parsed;
@@ -144,7 +162,7 @@ export const SaleOrderScreen: React.FC = () => {
 
   const getEffectiveUnitPrice = useCallback(
     (line: CartLine): number => {
-      const key = cartLineKey(line.item_id, line.item_batch_id);
+      const key = orderLineKey(line);
       const parsed = parseDraftPrice(priceDrafts[key]);
       if (parsed !== null && parsed >= 0) {
         return parsed;
@@ -168,14 +186,48 @@ export const SaleOrderScreen: React.FC = () => {
     [getLineTotalPreview, pos.cart],
   );
 
-  const previewOrderTotal = useMemo(
-    () => round2(Math.max(0, previewSubTotal - pos.discount - pos.offerDiscount)),
-    [pos.discount, pos.offerDiscount, previewSubTotal],
+  /** Exchange mode only — sale-direction lines total (mirrors pos.saleSubTotal but reflects live draft edits). */
+  const previewSaleSubTotal = useMemo(
+    () =>
+      round2(
+        pos.cart
+          .filter(l => l.line_direction !== 'return')
+          .reduce((sum, line) => sum + getLineTotalPreview(line), 0),
+      ),
+    [getLineTotalPreview, pos.cart],
   );
+
+  /** Exchange mode only — return-direction lines total (mirrors pos.returnSubTotal but reflects live draft edits). */
+  const previewReturnSubTotal = useMemo(
+    () =>
+      round2(
+        pos.cart
+          .filter(l => l.line_direction === 'return')
+          .reduce((sum, line) => sum + getLineTotalPreview(line), 0),
+      ),
+    [getLineTotalPreview, pos.cart],
+  );
+
+  /** Base subtotal for manual discount clamping — sale side only in Exchange mode. */
+  const previewDiscountBase = pos.isExchange ? previewSaleSubTotal : previewSubTotal;
+
+  const previewOrderTotal = useMemo(() => {
+    if (pos.isExchange) {
+      // Signed — negative means a refund is due to the customer.
+      return round2(previewSaleSubTotal - pos.discount - pos.offerDiscount - previewReturnSubTotal);
+    }
+    return round2(Math.max(0, previewSubTotal - pos.discount - pos.offerDiscount));
+  }, [pos.isExchange, previewSaleSubTotal, previewReturnSubTotal, pos.discount, pos.offerDiscount, previewSubTotal]);
+
+  const isRefundDue = pos.isExchange && previewOrderTotal < 0;
+  const needsRefundCardUi = pos.isReturn || isRefundDue;
+  // Plain-sale checkout only — a return/exchange/credit-account refund
+  // always settles through one path, no method-splitting there.
+  const canSplitPayment = !pos.isReturn && !pos.isExchange && !pos.returnFromCreditSale;
 
   const buildCheckoutCart = useCallback((): CartLine[] => {
     return pos.cart.map(line => {
-      const key = cartLineKey(line.item_id, line.item_batch_id);
+      const key = orderLineKey(line);
       const parsed = parseDraftQty(qtyDrafts[key]);
       const qty = parsed !== null && parsed > 0 ? parsed : line.qty;
       const unitPrice = getEffectiveUnitPrice(line);
@@ -234,14 +286,19 @@ export const SaleOrderScreen: React.FC = () => {
   useEffect(() => {
     // Credit means nothing is collected at the point of sale — default to 0 so an
     // un-edited field doesn't submit "fully paid" for a sale that's actually owed.
-    setAmountReceived(isCreditPayment(paymentMethod) ? '0' : String(previewOrderTotal));
-  }, [previewOrderTotal, paymentMethod]);
+    // A refund-due exchange shows/collects the positive refund magnitude, matching
+    // PaymentMethodDetails' netAmount for the same case.
+    const defaultAmount = isRefundDue
+      ? Math.abs(previewOrderTotal)
+      : previewOrderTotal;
+    setAmountReceived(isCreditPayment(paymentMethod) ? '0' : String(defaultAmount));
+  }, [isRefundDue, previewOrderTotal, paymentMethod]);
 
   useEffect(() => {
     setQtyDrafts(prev => {
       const next: Record<string, string> = {};
       for (const line of pos.cart) {
-        const key = cartLineKey(line.item_id, line.item_batch_id);
+        const key = orderLineKey(line);
         const draft = prev[key];
         const parsed = parseDraftQty(draft);
         next[key] =
@@ -257,7 +314,7 @@ export const SaleOrderScreen: React.FC = () => {
     setPriceDrafts(prev => {
       const next: Record<string, string> = {};
       for (const line of pos.cart) {
-        const key = cartLineKey(line.item_id, line.item_batch_id);
+        const key = orderLineKey(line);
         const draft = prev[key];
         const parsed = parseDraftPrice(draft);
         next[key] =
@@ -285,7 +342,7 @@ export const SaleOrderScreen: React.FC = () => {
   }, [pos.returnFromCreditSale, pos.paymentMethods, pos.setPaymentMethod]);
 
   useEffect(() => {
-    if (!pos.isReturn) {
+    if (!pos.isReturn && !pos.isExchange) {
       setRefundCardReady(true);
       return;
     }
@@ -303,7 +360,7 @@ export const SaleOrderScreen: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [pos.isReturn]);
+  }, [pos.isExchange, pos.isReturn]);
 
   useEffect(() => {
     if (!needsBank(paymentMethod)) {
@@ -331,21 +388,12 @@ export const SaleOrderScreen: React.FC = () => {
     [pos.items],
   );
 
-  const routeOptions = useMemo(() => {
-    const seen = new Set<string>();
-    for (const c of pos.customers) {
-      const route = c.route?.trim();
-      if (route) {
-        seen.add(route);
-      }
-    }
-    return Array.from(seen).sort((a, b) => a.localeCompare(b));
-  }, [pos.customers]);
-
   const customerOptions = [
     { id: 'walk-in', label: 'Walk-in Customer', subtitle: 'Default' },
     ...pos.customers
-      .filter(c => !routeFilter || c.route === routeFilter)
+      // Route is locked for this sale (picked on the start-sale gate) — keep
+      // the customer list scoped to it, same as before.
+      .filter(c => !pos.route || c.route === pos.route)
       .map(c => {
         const balance =
           (c.net_balance ?? 0) > 0
@@ -368,7 +416,7 @@ export const SaleOrderScreen: React.FC = () => {
 
   const commitLineQty = useCallback(
     (line: CartLine, raw: string) => {
-      const key = cartLineKey(line.item_id, line.item_batch_id);
+      const key = orderLineKey(line);
       const trimmed = raw.trim();
       if (!trimmed) {
         setQtyDrafts(prev => ({
@@ -379,17 +427,17 @@ export const SaleOrderScreen: React.FC = () => {
       }
       const parsed = parseDraftQty(trimmed);
       if (parsed === null || parsed <= 0) {
-        pos.removeFromCart(line.item_id, line.item_batch_id ?? null);
+        pos.removeFromCart(line.item_id, line.item_batch_id ?? null, line.line_direction);
         return;
       }
-      pos.updateCartQty(line.item_id, parsed, line.item_batch_id ?? null);
+      pos.updateCartQty(line.item_id, parsed, line.item_batch_id ?? null, line.line_direction);
     },
     [pos],
   );
 
   const commitLinePrice = useCallback(
     (line: CartLine, raw: string) => {
-      const key = cartLineKey(line.item_id, line.item_batch_id);
+      const key = orderLineKey(line);
       const trimmed = raw.trim();
       if (!trimmed) {
         setPriceDrafts(prev => ({
@@ -400,7 +448,7 @@ export const SaleOrderScreen: React.FC = () => {
       }
       const parsed = parseDraftPrice(trimmed);
       const price = parsed !== null ? Math.max(0, parsed) : line.unit_price;
-      pos.updateCartUnitPrice(line.item_id, price, line.item_batch_id ?? null);
+      pos.updateCartUnitPrice(line.item_id, price, line.item_batch_id ?? null, line.line_direction);
       setPriceDrafts(prev => ({ ...prev, [key]: String(price) }));
     },
     [pos],
@@ -408,7 +456,7 @@ export const SaleOrderScreen: React.FC = () => {
 
   const commitAllQtyDrafts = useCallback(() => {
     for (const line of pos.cart) {
-      const key = cartLineKey(line.item_id, line.item_batch_id);
+      const key = orderLineKey(line);
       commitLineQty(line, qtyDrafts[key] ?? String(line.qty));
     }
   }, [commitLineQty, pos.cart, qtyDrafts]);
@@ -418,7 +466,7 @@ export const SaleOrderScreen: React.FC = () => {
       return;
     }
     for (const line of pos.cart) {
-      const key = cartLineKey(line.item_id, line.item_batch_id);
+      const key = orderLineKey(line);
       commitLinePrice(line, priceDrafts[key] ?? String(line.unit_price));
     }
   }, [commitLinePrice, pos.cart, pos.isReturn, priceDrafts]);
@@ -432,14 +480,14 @@ export const SaleOrderScreen: React.FC = () => {
       return;
     }
     const next = round2(Math.max(0, parsed));
-    if (next > previewSubTotal) {
+    if (next > previewDiscountBase) {
       showError({
         title: 'Discount',
         message: 'Discount cannot be more than subtotal.',
         variant: 'warning',
       });
-      applyPosDiscount('amount', previewSubTotal);
-      setDiscountDraft(String(previewSubTotal));
+      applyPosDiscount('amount', previewDiscountBase);
+      setDiscountDraft(String(previewDiscountBase));
       return;
     }
     applyPosDiscount('amount', next);
@@ -448,7 +496,7 @@ export const SaleOrderScreen: React.FC = () => {
     applyPosDiscount,
     discountDraft,
     discountMode,
-    previewSubTotal,
+    previewDiscountBase,
     showError,
   ]);
 
@@ -491,7 +539,10 @@ export const SaleOrderScreen: React.FC = () => {
     // No auto-print here — land on the receipt screen so the cashier sees the
     // preview first and prints from there (its own Print button), rather than a
     // receipt firing silently before it's even been reviewed.
-    navigation.replace('SaleReceipt', { receipt: receiptWithCustomerInfo });
+    navigation.replace('SaleReceipt', {
+      receipt: receiptWithCustomerInfo,
+      customerId: activeCustomer?.id || null,
+    });
   };
 
   const handlePay = async () => {
@@ -500,7 +551,12 @@ export const SaleOrderScreen: React.FC = () => {
     commitAllQtyDrafts();
     commitAllPriceDrafts();
 
-    if (!pos.isReturn && pos.cartHasStockIssuesFor(pos.prepareCheckout(checkoutCart).lines)) {
+    const preparedLines = pos.prepareCheckout(checkoutCart).lines;
+    const stockCheckLines = pos.isExchange
+      ? preparedLines.filter(l => l.line_direction !== 'return')
+      : preparedLines;
+
+    if (!pos.isReturn && pos.cartHasStockIssuesFor(stockCheckLines)) {
       showError({
         title: 'Stock issue',
         message: 'Remove or reduce out-of-stock items before payment.',
@@ -509,11 +565,12 @@ export const SaleOrderScreen: React.FC = () => {
       return;
     }
 
-    const refundDigits = pos.isReturn
+    const needsRefundCard = pos.isReturn || (pos.isExchange && previewOrderTotal < 0);
+    const refundDigits = needsRefundCard
       ? (savedRefundCardLast4 ?? refundCardLast4).replace(/\D/g, '').slice(-4)
       : '';
 
-    if (pos.isReturn && !pos.returnFromCreditSale && refundDigits.length !== 4) {
+    if (needsRefundCard && !pos.returnFromCreditSale && refundDigits.length !== 4) {
       showError({
         title: 'Refund card',
         message: 'Enter credit card last 4 digits once. They will be saved for future returns.',
@@ -522,37 +579,84 @@ export const SaleOrderScreen: React.FC = () => {
       return;
     }
 
-    if (!pos.isReturn && isCreditPayment(paymentMethod) && isWalkInCustomer(pos.customer)) {
-      showError({
-        title: 'Credit sale',
-        message: 'Select a registered customer to charge this sale to their account.',
-        variant: 'warning',
-      });
-      return;
-    }
+    const isUsingSplitPayment = canSplitPayment && splitPayment;
+    const validSplitRows = splitRows.filter(
+      r => r.paymentMethod && (parseFloat(r.amount.replace(/,/g, '')) || 0) > 0,
+    );
 
-    if (
-      !pos.isReturn &&
-      needsPaymentReference(paymentMethod) &&
-      !paymentReference.trim()
-    ) {
-      showError({
-        title: isOnlinePayment(paymentMethod) ? 'Online payment' : 'Bank transfer',
-        message: isOnlinePayment(paymentMethod)
-          ? 'Enter the transaction or approval ID.'
-          : 'Enter the transfer reference number.',
-        variant: 'warning',
-      });
-      return;
-    }
+    if (isUsingSplitPayment) {
+      if (validSplitRows.length < 2) {
+        showError({
+          title: 'Split payment',
+          message: 'Add at least two payment methods with an amount.',
+          variant: 'warning',
+        });
+        return;
+      }
+      const splitTotal = round2(
+        validSplitRows.reduce((sum, r) => sum + (parseFloat(r.amount.replace(/,/g, '')) || 0), 0),
+      );
+      if (Math.abs(splitTotal - previewOrderTotal) > 0.01) {
+        showError({
+          title: 'Split payment',
+          message: `Split amounts (${formatCurrency(splitTotal, currency)}) must add up to the sale total (${formatCurrency(previewOrderTotal, currency)}).`,
+          variant: 'warning',
+        });
+        return;
+      }
+      const missingBank = validSplitRows.find(
+        r => /cheque|bank transfer/i.test(r.paymentMethod) && !r.bankName.trim(),
+      );
+      if (missingBank) {
+        showError({
+          title: 'Bank',
+          message: `Enter the bank name for the ${missingBank.paymentMethod} portion.`,
+          variant: 'warning',
+        });
+        return;
+      }
+      const hasCreditSplit = validSplitRows.some(r => isCreditPayment(r.paymentMethod));
+      if (hasCreditSplit && isWalkInCustomer(pos.customer)) {
+        showError({
+          title: 'Credit sale',
+          message: 'Select a registered customer for the credit portion so the balance can be tracked.',
+          variant: 'warning',
+        });
+        return;
+      }
+    } else {
+      if (!pos.isReturn && isCreditPayment(paymentMethod) && isWalkInCustomer(pos.customer)) {
+        showError({
+          title: 'Credit sale',
+          message: 'Select a registered customer to charge this sale to their account.',
+          variant: 'warning',
+        });
+        return;
+      }
 
-    if (!pos.isReturn && needsBank(paymentMethod) && !String(bankId ?? '').trim()) {
-      showError({
-        title: 'Bank',
-        message: 'Enter the bank name or ID.',
-        variant: 'warning',
-      });
-      return;
+      if (
+        !pos.isReturn &&
+        needsPaymentReference(paymentMethod) &&
+        !paymentReference.trim()
+      ) {
+        showError({
+          title: isOnlinePayment(paymentMethod) ? 'Online payment' : 'Bank transfer',
+          message: isOnlinePayment(paymentMethod)
+            ? 'Enter the transaction or approval ID.'
+            : 'Enter the transfer reference number.',
+          variant: 'warning',
+        });
+        return;
+      }
+
+      if (!pos.isReturn && needsBank(paymentMethod) && !String(bankId ?? '').trim()) {
+        showError({
+          title: 'Bank',
+          message: 'Enter the bank name or ID.',
+          variant: 'warning',
+        });
+        return;
+      }
     }
 
     const holdPin =
@@ -572,38 +676,169 @@ export const SaleOrderScreen: React.FC = () => {
     // `|| previewOrderTotal` would silently turn a real "0" (Credit — nothing collected)
     // back into the full total, since 0 is falsy — check for NaN specifically instead.
     const parsedReceived = parseFloat(amountReceived);
-    const received = Number.isNaN(parsedReceived) ? previewOrderTotal : parsedReceived;
+    const fallbackReceived = isRefundDue
+      ? Math.abs(previewOrderTotal)
+      : previewOrderTotal;
+    const received = Number.isNaN(parsedReceived) ? fallbackReceived : parsedReceived;
     const paymentNotes = buildPaymentNotes(paymentMethod, {
       reference: paymentReference,
       cardLast4: paymentCardLast4,
     });
 
-    const result = await pos.completeSale({
-      payment_method: paymentMethod,
-      amount_received: received,
-      bank_id: needsBank(paymentMethod) ? bankId : null,
-      cheque_number: /cheque/i.test(paymentMethod) ? chequeNumber.trim() || undefined : undefined,
-      notes: paymentNotes,
-      refund_card_last4: pos.isReturn ? refundDigits : null,
-      hold_pin: holdPin,
-      original_sale_id: pos.isReturn ? originalSaleId.trim() || null : null,
-      cart: checkoutCart,
+    // Nothing is saved yet — render the actual receipt (same component used once
+    // it's really saved) from local data, so what's reviewed here is a true
+    // preview of what prints, not just a numbers summary. A few fields that only
+    // exist after the server assigns them (e.g. the exact save timestamp) are
+    // filled with their expected local values and get overwritten by the real
+    // ones on the printed copy.
+    const customerName =
+      pos.customer && !isWalkInCustomer(pos.customer)
+        ? pos.customer.customer_name
+        : 'Walk-in Customer';
+
+    const draftLines: ReceiptLine[] = checkoutCart.map(line => ({
+      item_number: line.item_number,
+      description: line.description,
+      qty: line.qty,
+      unit_price: line.unit_price,
+      line_total: line.line_total,
+      uom: line.uom,
+      line_direction: pos.isExchange ? (line.line_direction ?? 'sale') : undefined,
+    }));
+
+    const draftReceipt: SaleReceiptPayload = {
+      sale: {
+        sales_id: pos.activeHoldSalesId ?? pos.salesId,
+        transaction_type: pos.isExchange
+          ? TRANSACTION_TYPE_EXCHANGE
+          : pos.isReturn
+            ? TRANSACTION_TYPE_RETURN
+            : TRANSACTION_TYPE_SALE,
+        is_return: pos.isReturn,
+        is_exchange: pos.isExchange,
+        order_status: 'completed',
+        discount_type: pos.orderDiscountType,
+        discount_percent: pos.discountPercent,
+        // Plain YYYY-MM-DD, local device time — matches exactly what the
+        // real (post-save) receipt shows via Sale.sale_date on the backend.
+        // A raw ISO datetime (with a Z/UTC suffix) printed as-is on the
+        // review screen showed the wrong day/time for anyone not in UTC.
+        sale_date: formatDateYmd(new Date()),
+        location: pos.location,
+        payment_method: isUsingSplitPayment ? 'Split' : paymentMethod,
+        customer_name: customerName,
+        customer_code: pos.customer?.customer_code ?? null,
+        customer_contact_no: pos.customer?.contact_no ?? null,
+        customer_email: pos.customer?.email ?? null,
+        customer_location: pos.customer?.location ?? null,
+        customer_route: pos.customer?.route ?? null,
+        customer_address: pos.customer?.address ?? null,
+        customer_tax_id: pos.customer?.tax_id ?? null,
+        sub_total: pos.isExchange ? previewSaleSubTotal : previewSubTotal,
+        return_sub_total: pos.isExchange ? previewReturnSubTotal : undefined,
+        discount: pos.discount,
+        net_amount: previewOrderTotal,
+        amount_received: received,
+        cheque_number: !isUsingSplitPayment && /cheque/i.test(paymentMethod)
+          ? chequeNumber.trim() || null
+          : null,
+        bank_name: !isUsingSplitPayment && needsBank(paymentMethod)
+          ? String(bankId ?? '').trim() || null
+          : null,
+        payment_splits: isUsingSplitPayment
+          ? validSplitRows.map(r => ({
+              payment_method: r.paymentMethod,
+              amount: parseFloat(r.amount.replace(/,/g, '')) || 0,
+              cheque_number: r.chequeNumber.trim() || null,
+              bank_name: r.bankName.trim() || null,
+            }))
+          : undefined,
+        lines: draftLines,
+      },
+      header: {},
+      hardware_settings: (settings?.hardware ?? {}) as Record<string, unknown>,
+      print_options: {},
+      labels: {},
+    };
+
+    // Credit portion of this sale — not yet saved, so the customer's balance
+    // fetched below won't include it yet. Shown added on top so the review
+    // screen's "outstanding balance" reflects what it will be after Confirm.
+    const pendingCreditAmount = isUsingSplitPayment
+      ? round2(
+          validSplitRows
+            .filter(r => isCreditPayment(r.paymentMethod))
+            .reduce((sum, r) => sum + (parseFloat(r.amount.replace(/,/g, '')) || 0), 0),
+        )
+      : !pos.isReturn && isCreditPayment(paymentMethod)
+        ? round2(previewOrderTotal - received)
+        : 0;
+
+    // Land on the real receipt screen in "review" mode instead of a popup —
+    // it's the same screen/layout already used for the saved receipt (proven
+    // to lay out correctly), just with Edit/Confirm in place of print/share.
+    navigation.navigate('SaleReceipt', {
+      receipt: draftReceipt,
+      customerId:
+        pos.customer && !isWalkInCustomer(pos.customer) ? pos.customer.id : null,
+      pendingCreditAmount: pendingCreditAmount > 0 ? pendingCreditAmount : undefined,
+      pendingConfirm: {
+        title: pos.isExchange
+          ? 'Confirm exchange'
+          : pos.isReturn
+            ? 'Confirm return'
+            : completingHold
+              ? 'Confirm sale (from hold)'
+              : 'Confirm sale',
+        confirmLabel: isRefundDue || pos.isReturn ? 'Confirm & Refund' : 'Confirm & Print',
+        onEdit: () => navigation.goBack(),
+        onConfirm: async () => {
+          const result = await pos.completeSale({
+            payment_method: isUsingSplitPayment ? 'Split' : paymentMethod,
+            amount_received: received,
+            // This screen's bank field is free text (bankAsFreeText below),
+            // not a picker over real registered banks — belongs in
+            // bank_name, not the numeric bank_id.
+            bank_id: null,
+            bank_name: !isUsingSplitPayment && needsBank(paymentMethod)
+              ? String(bankId ?? '').trim() || null
+              : null,
+            cheque_number: !isUsingSplitPayment && /cheque/i.test(paymentMethod)
+              ? chequeNumber.trim() || undefined
+              : undefined,
+            payment_splits: isUsingSplitPayment
+              ? validSplitRows.map(r => ({
+                  payment_method: r.paymentMethod,
+                  amount: parseFloat(r.amount.replace(/,/g, '')) || 0,
+                  cheque_number: r.chequeNumber.trim() || null,
+                  bank_name: r.bankName.trim() || null,
+                }))
+              : undefined,
+            notes: paymentNotes,
+            refund_card_last4: needsRefundCard ? refundDigits : null,
+            hold_pin: holdPin,
+            original_sale_id:
+              pos.isReturn || pos.isExchange ? originalSaleId.trim() || null : null,
+            cart: checkoutCart,
+          });
+
+          if (!result) {
+            return;
+          }
+
+          if (completingHold && holdPin && !savedHoldPin) {
+            await saveHoldPin(holdPin);
+          }
+
+          if (needsRefundCard && refundDigits.length === 4 && !savedRefundCardLast4) {
+            await refundCardStorage.save(refundDigits);
+            setSavedRefundCardLast4(refundDigits);
+          }
+
+          await deliverReceipt(result.receipt);
+        },
+      },
     });
-
-    if (!result) {
-      return;
-    }
-
-    if (completingHold && holdPin && !savedHoldPin) {
-      await saveHoldPin(holdPin);
-    }
-
-    if (pos.isReturn && refundDigits.length === 4 && !savedRefundCardLast4) {
-      await refundCardStorage.save(refundDigits);
-      setSavedRefundCardLast4(refundDigits);
-    }
-
-    await deliverReceipt(result.receipt);
   };
 
   const handleHold = async () => {
@@ -707,6 +942,22 @@ export const SaleOrderScreen: React.FC = () => {
             </Box>
           ) : null}
 
+          {pos.isExchange ? (
+            <Box
+              bg={colors.warningSoft}
+              borderRadius="$lg"
+              px="$3"
+              py="$2"
+              mb="$3"
+              borderWidth={1}
+              borderColor={colors.warning}>
+              <Text size="sm" color={colors.warning} fontWeight="$bold">
+                Exchange — new items deduct stock, returned items restock. You'll{' '}
+                {isRefundDue ? 'refund' : 'collect'} the difference only.
+              </Text>
+            </Box>
+          ) : null}
+
           {pos.activeHoldSalesId ? (
             <Box
               bg={colors.warningSoft}
@@ -749,7 +1000,7 @@ export const SaleOrderScreen: React.FC = () => {
           <View style={styles.cartPanel}>
             <View style={styles.cartPanelHeader}>
               <Text style={styles.cartPanelTitle}>
-                {pos.isReturn ? 'Items to return' : 'Cart'}
+                {pos.isReturn ? 'Items to return' : pos.isExchange ? 'Cart (sale + return)' : 'Cart'}
               </Text>
               <Text style={styles.cartPanelCount}>
                 {pos.cart.length} line{pos.cart.length === 1 ? '' : 's'}
@@ -776,12 +1027,17 @@ export const SaleOrderScreen: React.FC = () => {
             ) : null}
 
             {pos.cart.map(line => {
-              const lineKey = cartLineKey(line.item_id, line.item_batch_id);
+              const lineKey = orderLineKey(line);
               const item = itemStockMap.get(line.item_id);
               const stock = item?.qty ?? 0;
+              // In Sale/Return modes every line matches the screen-wide mode already —
+              // in Exchange mode a line's own direction decides its treatment.
+              const lineIsReturn = pos.isExchange
+                ? line.line_direction === 'return'
+                : pos.isReturn;
               const outOfStock =
-                !pos.isReturn && !pos.allowNegativeInventory && stock <= 0;
-              const maxReturn = pos.isReturn
+                !lineIsReturn && !pos.allowNegativeInventory && stock <= 0;
+              const maxReturn = lineIsReturn
                 ? pos.getMaxReturnQty(line.item_id, line.item_batch_id ?? null)
                 : undefined;
               const lineTotalPreview = getLineTotalPreview(line);
@@ -799,9 +1055,10 @@ export const SaleOrderScreen: React.FC = () => {
                   qtyDraft={qtyDrafts[lineKey] ?? String(line.qty)}
                   priceDraft={priceDrafts[lineKey] ?? String(line.unit_price)}
                   allowEditPrice
+                  allowEditReturnPrice={pos.isExchange}
                   lineTotal={lineTotalPreview}
                   offerDiscount={offerLineDiscount}
-                  isReturn={pos.isReturn}
+                  isReturn={lineIsReturn}
                   allowNegativeInventory={pos.allowNegativeInventory}
                   maxReturn={maxReturn}
                   outOfStock={outOfStock}
@@ -820,7 +1077,11 @@ export const SaleOrderScreen: React.FC = () => {
                     commitLinePrice(line, priceDrafts[lineKey] ?? String(line.unit_price))
                   }
                   onDecrement={() =>
-                    pos.decrementCartQty(line.item_id, line.item_batch_id ?? null)
+                    pos.decrementCartQty(
+                      line.item_id,
+                      line.item_batch_id ?? null,
+                      line.line_direction,
+                    )
                   }
                   onIncrement={() => {
                     const parsed = parseDraftQty(qtyDrafts[lineKey]);
@@ -829,10 +1090,11 @@ export const SaleOrderScreen: React.FC = () => {
                       line.item_id,
                       current + 1,
                       line.item_batch_id ?? null,
+                      line.line_direction,
                     );
                   }}
                   onRemove={() =>
-                    pos.removeFromCart(line.item_id, line.item_batch_id ?? null)
+                    pos.removeFromCart(line.item_id, line.item_batch_id ?? null, line.line_direction)
                   }
                 />
               );
@@ -912,8 +1174,8 @@ export const SaleOrderScreen: React.FC = () => {
                   if (nextMode === discountMode) {
                     return;
                   }
-                  if (nextMode === 'percent' && previewSubTotal > 0) {
-                    const pct = round2((pos.discount / previewSubTotal) * 100);
+                  if (nextMode === 'percent' && previewDiscountBase > 0) {
+                    const pct = round2((pos.discount / previewDiscountBase) * 100);
                     setDiscountMode('percent');
                     setDiscountDraft(String(pct));
                     applyPosDiscount('percent', pct);
@@ -949,9 +1211,19 @@ export const SaleOrderScreen: React.FC = () => {
                 Subtotal
               </Text>
               <Text fontWeight="$semibold" color={colors.text}>
-                {formatCurrency(previewSubTotal, currency)}
+                {formatCurrency(pos.isExchange ? previewSaleSubTotal : previewSubTotal, currency)}
               </Text>
             </HStack>
+            {pos.isExchange && previewReturnSubTotal > 0 ? (
+              <HStack justifyContent="space-between" mb="$1">
+                <Text fontWeight="$semibold" color={colors.textSecondary}>
+                  Return credit
+                </Text>
+                <Text fontWeight="$semibold" color={colors.error}>
+                  -{formatCurrency(previewReturnSubTotal, currency)}
+                </Text>
+              </HStack>
+            ) : null}
             {!pos.isReturn && pos.offerDiscount > 0 ? (
               <HStack justifyContent="space-between" mb="$1">
                 <Text fontWeight="$semibold" color={colors.textSecondary}>
@@ -977,13 +1249,17 @@ export const SaleOrderScreen: React.FC = () => {
             ) : null}
             <HStack justifyContent="space-between">
               <Text fontWeight="$semibold" color={colors.textSecondary}>
-                {pos.discount > 0 || pos.offerDiscount > 0 ? 'Balance' : 'Total'}
+                {isRefundDue
+                  ? 'Refund due'
+                  : pos.discount > 0 || pos.offerDiscount > 0
+                    ? 'Balance'
+                    : 'Total'}
               </Text>
               <Text
                 fontSize="$xl"
                 fontWeight="$bold"
-                color={pos.isReturn ? colors.error : colors.primary}>
-                {formatCurrency(previewOrderTotal, currency)}
+                color={pos.isReturn || isRefundDue ? colors.error : colors.primary}>
+                {formatCurrency(Math.abs(previewOrderTotal), currency)}
               </Text>
             </HStack>
           </View>
@@ -999,23 +1275,24 @@ export const SaleOrderScreen: React.FC = () => {
                 placeholderTextColor={colors.textMuted}
                 editable={!pos.returnSourceSale}
               />
-              {refundCardReady && !savedRefundCardLast4 && !pos.returnFromCreditSale ? (
-                <>
-                  <Text style={styles.sectionTitle}>Refund card last 4 digits</Text>
-                  <Text style={styles.refundCardHint}>
-                    Enter once — saved on this device for all future returns.
-                  </Text>
-                  <TextInput
-                    value={refundCardLast4}
-                    onChangeText={t => setRefundCardLast4(t.replace(/\D/g, '').slice(0, 4))}
-                    keyboardType="number-pad"
-                    maxLength={4}
-                    style={appInputStyle}
-                    placeholder="••••"
-                    placeholderTextColor={colors.textMuted}
-                  />
-                </>
-              ) : null}
+            </>
+          ) : null}
+
+          {needsRefundCardUi && refundCardReady && !savedRefundCardLast4 && !pos.returnFromCreditSale ? (
+            <>
+              <Text style={styles.sectionTitle}>Refund card last 4 digits</Text>
+              <Text style={styles.refundCardHint}>
+                Enter once — saved on this device for all future returns.
+              </Text>
+              <TextInput
+                value={refundCardLast4}
+                onChangeText={t => setRefundCardLast4(t.replace(/\D/g, '').slice(0, 4))}
+                keyboardType="number-pad"
+                maxLength={4}
+                style={appInputStyle}
+                placeholder="••••"
+                placeholderTextColor={colors.textMuted}
+              />
             </>
           ) : null}
 
@@ -1048,48 +1325,85 @@ export const SaleOrderScreen: React.FC = () => {
             <ChevronRight size={16} color={colors.primaryLight} />
           </Pressable>
 
-          <PaymentMethodPicker
-            methods={pos.paymentMethods}
-            selected={paymentMethod}
-            lockedMethod={
-              pos.returnFromCreditSale
-                ? resolveCreditPaymentMethod(pos.paymentMethods)
-                : null
-            }
-            title={pos.returnFromCreditSale ? 'Refund to account' : 'Payment method'}
-            onSelect={method => {
-              setPaymentMethod(method);
-              pos.setPaymentMethod(method);
-            }}
-          />
+          {canSplitPayment ? (
+            <Pressable
+              onPress={() => setSplitPayment(v => !v)}
+              flexDirection="row"
+              alignItems="center"
+              justifyContent="space-between"
+              mb="$3"
+              accessibilityRole="button">
+              <Text size="sm" fontWeight="$semibold" color={colors.text}>
+                Split payment across methods
+              </Text>
+              <Box
+                px="$3"
+                py="$1"
+                borderRadius="$full"
+                borderWidth={1}
+                borderColor={splitPayment ? colors.primary : colors.border}
+                bg={splitPayment ? colors.primary : colors.white}>
+                <Text size="xs" fontWeight="$bold" color={splitPayment ? colors.textOnPrimary : colors.textSecondary}>
+                  {splitPayment ? 'On' : 'Off'}
+                </Text>
+              </Box>
+            </Pressable>
+          ) : null}
 
-          <PaymentMethodDetails
-            paymentMethod={paymentMethod}
-            isReturn={pos.isReturn}
-            netAmount={previewOrderTotal}
-            currency={currency}
-            amountReceived={amountReceived}
-            onAmountReceivedChange={setAmountReceived}
-            banks={banks}
-            bankId={bankId}
-            onBankIdChange={setBankId}
-            bankAsFreeText
-            chequeNumber={chequeNumber}
-            onChequeNumberChange={setChequeNumber}
-            paymentReference={paymentReference}
-            onPaymentReferenceChange={setPaymentReference}
-            paymentCardLast4={paymentCardLast4}
-            onPaymentCardLast4Change={setPaymentCardLast4}
-            customer={pos.customer}
-          />
+          {splitPayment && canSplitPayment ? (
+            <SplitPaymentEditor
+              methods={pos.paymentMethods}
+              rows={splitRows}
+              onChange={setSplitRows}
+              total={previewOrderTotal}
+              currency={currency}
+            />
+          ) : (
+            <>
+              <PaymentMethodPicker
+                methods={pos.paymentMethods}
+                selected={paymentMethod}
+                lockedMethod={
+                  pos.returnFromCreditSale
+                    ? resolveCreditPaymentMethod(pos.paymentMethods)
+                    : null
+                }
+                title={pos.returnFromCreditSale ? 'Refund to account' : 'Payment method'}
+                onSelect={method => {
+                  setPaymentMethod(method);
+                  pos.setPaymentMethod(method);
+                }}
+              />
+
+              <PaymentMethodDetails
+                paymentMethod={paymentMethod}
+                isReturn={pos.isReturn || isRefundDue}
+                netAmount={isRefundDue ? Math.abs(previewOrderTotal) : previewOrderTotal}
+                currency={currency}
+                amountReceived={amountReceived}
+                onAmountReceivedChange={setAmountReceived}
+                banks={banks}
+                bankId={bankId}
+                onBankIdChange={setBankId}
+                bankAsFreeText
+                chequeNumber={chequeNumber}
+                onChequeNumberChange={setChequeNumber}
+                paymentReference={paymentReference}
+                onPaymentReferenceChange={setPaymentReference}
+                paymentCardLast4={paymentCardLast4}
+                onPaymentCardLast4Change={setPaymentCardLast4}
+                customer={pos.customer}
+              />
+            </>
+          )}
         </SmoothScrollView>
 
         <OrderCheckoutFooter
-          total={previewOrderTotal}
+          total={isRefundDue ? Math.abs(previewOrderTotal) : previewOrderTotal}
           currency={currency}
           paymentMethod={paymentMethod}
           showHold={showHoldFab}
-          isReturn={pos.isReturn}
+          isReturn={pos.isReturn || isRefundDue}
           onHold={showHoldFab ? handleHold : undefined}
           onPay={handlePay}
           holdLoading={holding}
@@ -1120,9 +1434,8 @@ export const SaleOrderScreen: React.FC = () => {
           navigation.navigate('CustomerForm', { selectOnSave: true });
         }}
         headerExtra={
-          routeOptions.length > 0 ? (
-            <Pressable
-              onPress={() => setRouteModal(true)}
+          pos.route ? (
+            <Box
               flexDirection="row"
               alignItems="center"
               justifyContent="space-between"
@@ -1135,25 +1448,15 @@ export const SaleOrderScreen: React.FC = () => {
                   Route
                 </Text>
                 <Text fontWeight="$semibold" color={colors.text}>
-                  {routeFilter ?? 'All routes'}
+                  {pos.route}
                 </Text>
               </VStack>
-              <ChevronRight size={16} color={colors.primaryLight} />
-            </Pressable>
+              <Text size="xs" color={colors.textMuted}>
+                Locked for this sale
+              </Text>
+            </Box>
           ) : undefined
         }
-      />
-
-      <SelectionModal
-        visible={routeModal}
-        title="Filter by route"
-        options={[
-          { id: '__all__', label: 'All routes' },
-          ...routeOptions.map(r => ({ id: r, label: r })),
-        ]}
-        onSelect={opt => setRouteFilter(opt.id === '__all__' ? null : opt.id)}
-        onClose={() => setRouteModal(false)}
-        emptyMessage="No routes"
       />
     </ScreenContainer>
   );

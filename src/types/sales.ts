@@ -6,8 +6,10 @@ export const TRANSACTION_TYPE_SALE = '1001';
 export const TRANSACTION_TYPE_RETURN = '1002';
 /** Quotation — no stock/payment until completed */
 export const TRANSACTION_TYPE_QUOTATION = '1003';
+/** Exchange — sale + return in one bill, deducts stock for sold lines and restores it for returned lines */
+export const TRANSACTION_TYPE_EXCHANGE = '1004';
 
-export type SaleTransactionMode = 'sale' | 'return';
+export type SaleTransactionMode = 'sale' | 'return' | 'exchange';
 
 export interface PosFilters {
   transaction_types: string[];
@@ -103,6 +105,8 @@ export interface CartLine {
   batch_expiry_date?: string | null;
   /** Branch inventory row used for stock deduction */
   inventory_location?: string | null;
+  /** Exchange mode only — tags whether this line is a new sale item or a returned item. Absent/'sale' in normal Sale/Return modes. */
+  line_direction?: 'sale' | 'return';
 }
 
 export interface SaleLineItem extends CartLine {
@@ -125,6 +129,12 @@ export interface SaleRecord {
   payment_method?: string | null;
   amount_received?: number | null;
   notes?: string | null;
+  /** True once a sale-time cheque has been marked as returned (bounced) —
+   * distinct from a product return. See customerService.returnSaleCheque. */
+  cheque_returned?: boolean;
+  /** Present only when payment_method is 'Split' — part cash, part cheque,
+   * part credit, etc. on this one sale. */
+  payment_splits?: SalePaymentSplitInput[];
   items: SaleLineItem[];
 }
 
@@ -135,6 +145,7 @@ export interface ReceiptLine {
   unit_price: number;
   line_total: number;
   uom?: string | null;
+  line_direction?: 'sale' | 'return';
 }
 
 export interface SaleReceiptPayload {
@@ -142,6 +153,7 @@ export interface SaleReceiptPayload {
     sales_id: string;
     transaction_type?: string;
     is_return?: boolean;
+    is_exchange?: boolean;
     order_status?: string;
     is_hold?: boolean;
     discount_type?: 'percent' | 'amount';
@@ -158,10 +170,21 @@ export interface SaleReceiptPayload {
     customer_address?: string | null;
     customer_tax_id?: string | null;
     sub_total: number;
+    return_sub_total?: number;
     discount: number;
     service_charge?: number;
     net_amount: number;
     amount_received?: number | null;
+    cheque_number?: string | null;
+    bank_name?: string | null;
+    /** Present only for a split-payment sale — part cash, part cheque,
+     * part credit, etc. */
+    payment_splits?: Array<{
+      payment_method: string;
+      amount: number;
+      cheque_number?: string | null;
+      bank_name?: string | null;
+    }>;
     lines: ReceiptLine[];
     discount_label?: string | null;
     show_barcode?: boolean;
@@ -188,12 +211,17 @@ export interface CreateSalePayload {
   customer_id?: number | null;
   customer_name?: string | null;
   sub_total: number;
+  /** Exchange only — total value of returned lines, informational (net_amount is already signed). */
+  return_sub_total?: number;
   discount: number;
   service_charge?: number;
   net_amount: number;
   payment_method?: string;
   amount_received?: number;
   bank_id?: number | string | null;
+  /** Freely-typed bank name from checkout — bank_id only fits a real
+   * registered bank; a free-text entry belongs here instead. */
+  bank_name?: string | null;
   cheque_number?: string | null;
   notes?: string | null;
   items: CartLine[];
@@ -201,12 +229,26 @@ export interface CreateSalePayload {
   offer_id?: number | null;
   offer_promo_code?: string | null;
   promo_code?: string | null;
+  payment_splits?: SalePaymentSplitInput[];
+}
+
+/** One row of a split payment — part cash, part cheque, part credit, etc.
+ * on a single sale. Sent instead of the top-level payment method and bank
+ * fields when the cashier splits payment across methods. */
+export interface SalePaymentSplitInput {
+  payment_method: string;
+  amount: number;
+  cheque_number?: string | null;
+  bank_name?: string | null;
 }
 
 export interface SalePaymentDetails {
   payment_method: string;
   amount_received: number;
   bank_id?: number | string | null;
+  /** Freely-typed bank name from checkout — bank_id only fits a real
+   * registered bank; a free-text entry belongs here instead. */
+  bank_name?: string | null;
   cheque_number?: string | null;
   notes?: string | null;
   refund_card_last4?: string | null;
@@ -214,4 +256,5 @@ export interface SalePaymentDetails {
   original_sale_id?: string | null;
   /** Committed cart lines (e.g. after manual qty entry on order screen). */
   cart?: CartLine[];
+  payment_splits?: SalePaymentSplitInput[];
 }

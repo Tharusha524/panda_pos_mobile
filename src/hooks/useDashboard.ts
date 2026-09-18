@@ -26,6 +26,7 @@ const mapTransactions = (
 ): RecentTransaction[] =>
   items.map(tx => ({
     id: `${tx.type}-${tx.id}`,
+    rawId: tx.id,
     type: tx.type === 'return' ? 'return' : tx.type,
     title: tx.party?.trim() || tx.reference || 'Transaction',
     reference: tx.reference ?? undefined,
@@ -93,10 +94,12 @@ export const useDashboard = () => {
     error,
     refresh: () => load(false, true),
     generatedAt: overview?.generated_at,
-    revenue: formatCurrency(metrics?.today_sales_amount, currency),
+    // Net of today's returns — falls back to the gross figure only if the
+    // backend hasn't sent the netted one (older API).
+    revenue: formatCurrency(metrics?.today_net_sales_amount ?? metrics?.today_sales_amount, currency),
     revenueChange: chartHint,
     revenueHint,
-    monthRevenue: formatCurrency(metrics?.month_sales_amount, currency),
+    monthRevenue: formatCurrency(metrics?.month_net_sales_amount ?? metrics?.month_sales_amount, currency),
     orders: formatNumber(metrics?.today_sales_count),
     products: formatNumber(metrics?.active_items),
     lowStock: formatNumber(metrics?.low_stock_count),

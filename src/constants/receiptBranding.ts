@@ -9,6 +9,8 @@ export const PURCHASE_RECEIPT_TITLE = 'PURCHASE RECEIPT';
 export function getSaleReceiptTitle(options: {
   isHold?: boolean;
   isReturn?: boolean;
+  /** Accepted but intentionally ignored — exchange receipts keep the "SALES RECEIPT" title. */
+  isExchange?: boolean;
 }): string {
   if (options.isHold) {
     return 'HOLD ORDER';

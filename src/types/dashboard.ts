@@ -7,6 +7,7 @@ export interface DashboardMetrics {
   today_returns_count?: number;
   today_net_sales_amount?: number;
   month_sales_amount: number;
+  month_net_sales_amount?: number;
   today_purchases_amount: number;
   today_purchases_count: number;
   today_expenses_amount: number;

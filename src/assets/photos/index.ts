@@ -1,6 +1,6 @@
 /** Brand & onboarding images under src/assets/photos/assets */
 export const photoAssets = {
-  companyLogo: require('./assets/company-logo1.jpg'),
+  companyLogo: require('./assets/dio-logo.png'),
   companyLogoAlt: require('./assets/group-logo.png'),
   openingSlides: [
     require('./assets/new1.png'),

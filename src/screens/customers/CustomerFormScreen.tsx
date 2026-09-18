@@ -1,12 +1,14 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   KeyboardAvoidingView,
+  Linking,
   Platform,
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
   Keyboard,
   StyleSheet,
+  View,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
@@ -14,7 +16,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ScrollView } from 'react-native-gesture-handler';
 import { Box, HStack, Text, VStack } from '@gluestack-ui/themed';
-import { MapPin, Navigation } from 'lucide-react-native';
+import { MapPin, Navigation, Phone } from 'lucide-react-native';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { AppHeader } from '@/components/common/AppHeader';
@@ -70,9 +72,19 @@ export const CustomerFormScreen: React.FC = () => {
   const [address, setAddress] = useState('');
   const [taxId, setTaxId] = useState('');
   const [locations, setLocations] = useState<string[]>(['Main Location']);
+  const [routeOptions, setRouteOptions] = useState<string[]>([]);
+  const [routeDropdownOpen, setRouteDropdownOpen] = useState(false);
   const [gpsLatitude, setGpsLatitude] = useState<number | null>(null);
   const [gpsLongitude, setGpsLongitude] = useState<number | null>(null);
   const [capturingLocation, setCapturingLocation] = useState(false);
+
+  const filteredRouteOptions = React.useMemo(() => {
+    const query = customerRoute.trim().toLowerCase();
+    const matches = query
+      ? routeOptions.filter(r => r.toLowerCase().includes(query))
+      : routeOptions;
+    return matches.filter(r => r.toLowerCase() !== query);
+  }, [routeOptions, customerRoute]);
 
   const scrollToFocusedField = useCallback(() => {
     if (!scrollRef.current) return;
@@ -95,6 +107,15 @@ export const CustomerFormScreen: React.FC = () => {
         setLocations(
           list.filters.locations.length ? list.filters.locations : ['Main Location'],
         );
+
+        const seenRoutes = new Set<string>();
+        for (const c of list.customers) {
+          const r = c.route?.trim();
+          if (r) {
+            seenRoutes.add(r);
+          }
+        }
+        setRouteOptions(Array.from(seenRoutes).sort((a, b) => a.localeCompare(b)));
 
         if (isEdit && customerId) {
           const customer = await customerService.get(customerId);
@@ -199,6 +220,17 @@ export const CustomerFormScreen: React.FC = () => {
         }
       },
     });
+  };
+
+  const handleCallContact = async () => {
+    const digits = contactNo.trim();
+    if (!digits) return;
+    const url = `tel:${digits}`;
+    try {
+      await Linking.openURL(url);
+    } catch (e) {
+      showErrorFromUnknown(e, 'Call customer');
+    }
   };
 
   const handleCaptureLocation = async () => {
@@ -307,16 +339,25 @@ export const CustomerFormScreen: React.FC = () => {
               />
 
               <Label>Contact number *</Label>
-              <TextInput
-                value={contactNo}
-                onChangeText={setContactNo}
-                style={appInputStyle}
-                placeholder="Phone number"
-                placeholderTextColor={appInputPlaceholderColor}
-                keyboardType="phone-pad"
-                editable={!submitting}
-                onFocus={scrollToFocusedField}
-              />
+              <View style={styles.contactRow}>
+                <TextInput
+                  value={contactNo}
+                  onChangeText={setContactNo}
+                  style={[appInputStyle, styles.contactInput]}
+                  placeholder="Phone number"
+                  placeholderTextColor={appInputPlaceholderColor}
+                  keyboardType="phone-pad"
+                  editable={!submitting}
+                  onFocus={scrollToFocusedField}
+                />
+                <TouchableOpacity
+                  onPress={handleCallContact}
+                  disabled={!contactNo.trim()}
+                  style={[styles.callButton, !contactNo.trim() && styles.callButtonDisabled]}
+                  accessibilityLabel="Call customer">
+                  <Phone size={20} color={contactNo.trim() ? colors.white : colors.textMuted} />
+                </TouchableOpacity>
+              </View>
 
               <Label>Email</Label>
               <TextInput
@@ -340,15 +381,44 @@ export const CustomerFormScreen: React.FC = () => {
               />
 
               <Label>Route *</Label>
-              <TextInput
-                value={customerRoute}
-                onChangeText={setCustomerRoute}
-                style={appInputStyle}
-                placeholder="e.g. Colombo North"
-                placeholderTextColor={appInputPlaceholderColor}
-                editable={!submitting}
-                onFocus={scrollToFocusedField}
-              />
+              <View style={styles.routeFieldWrap}>
+                <TextInput
+                  value={customerRoute}
+                  onChangeText={text => {
+                    setCustomerRoute(text);
+                    setRouteDropdownOpen(true);
+                  }}
+                  style={appInputStyle}
+                  placeholder="e.g. Colombo North"
+                  placeholderTextColor={appInputPlaceholderColor}
+                  editable={!submitting}
+                  onFocus={() => {
+                    scrollToFocusedField();
+                    setRouteDropdownOpen(true);
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => setRouteDropdownOpen(false), 150);
+                  }}
+                />
+                {routeDropdownOpen && filteredRouteOptions.length > 0 ? (
+                  <View style={styles.routeDropdown}>
+                    <SmoothScrollView keyboardShouldPersistTaps="handled" style={styles.routeDropdownScroll}>
+                      {filteredRouteOptions.map(r => (
+                        <TouchableOpacity
+                          key={r}
+                          style={styles.routeDropdownRow}
+                          onPress={() => {
+                            setCustomerRoute(r);
+                            setRouteDropdownOpen(false);
+                            Keyboard.dismiss();
+                          }}>
+                          <Text color={colors.text}>{r}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </SmoothScrollView>
+                  </View>
+                ) : null}
+              </View>
 
               <Label>Address</Label>
               <TextInput
@@ -444,6 +514,56 @@ export const CustomerFormScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  contactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  contactInput: {
+    flex: 1,
+  },
+  callButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+  },
+  callButtonDisabled: {
+    backgroundColor: colors.border,
+  },
+  routeFieldWrap: {
+    position: 'relative',
+    zIndex: 10,
+  },
+  routeDropdown: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: 4,
+    maxHeight: 180,
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    zIndex: 20,
+  },
+  routeDropdownScroll: {
+    maxHeight: 180,
+  },
+  routeDropdownRow: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
   scroll: {
     flexGrow: 1,
     paddingTop: 4,

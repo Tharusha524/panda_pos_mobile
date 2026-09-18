@@ -8,7 +8,7 @@ export const REPORT_BACKEND_MAP: Record<SystemReportType, ReportBackendSource> =
   sales_report: 'sales-details',
   expense_report: 'expense-summary',
   customer_report: 'customer-list',
-  customer_settlement: 'customer-payment',
+  customer_settlement: 'customer-settlement',
   return_report: 'sales-return-details',
   credit_sales: 'customer-outstanding',
   item_report: 'item-list',
