@@ -6,6 +6,7 @@ import { inventoryService } from '@/services/api/inventoryService';
 import { salesService } from '@/services/api/salesService';
 import { offerService } from '@/services/api/offerService';
 import { lastRouteStorage } from '@/services/storage/lastRouteStorage';
+import { lastLocationStorage } from '@/services/storage/lastLocationStorage';
 import type { ApplicableOffer, OfferPreviewResult } from '@/types/offers';
 import {
   findBestAutoOffer,
@@ -297,11 +298,18 @@ export const usePosSale = () => {
         loadCustomers(),
       ]);
       setContext(ctx);
-      const loc = defaultLocation(ctx.filters.locations);
+      // Pre-fill with whichever branch was picked last on this device (saved
+      // when "Start Sale" is confirmed) — falls back to the server default
+      // if that branch no longer exists.
+      const savedLocation = await lastLocationStorage.get();
+      const loc =
+        savedLocation && ctx.filters.locations.includes(savedLocation)
+          ? savedLocation
+          : defaultLocation(ctx.filters.locations);
       setLocation(loc);
       setPaymentMethod(ctx.filters.payment_methods[0] ?? 'Cash');
-      await loadCategories();
-      await loadItems();
+      await loadCategories(loc);
+      await loadItems(undefined, false, loc);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load POS');
     } finally {
@@ -357,7 +365,8 @@ export const usePosSale = () => {
   const lockRouteSelection = useCallback(() => {
     setRouteLocked(true);
     void lastRouteStorage.save(route);
-  }, [route]);
+    void lastLocationStorage.save(branchLocation);
+  }, [route, branchLocation]);
 
   // Undoes lockRouteSelection when the cashier backs out of a sale before
   // adding anything to the cart (e.g. switches to another tab) — otherwise

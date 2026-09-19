@@ -19,8 +19,9 @@ interface BackendReportViewProps {
   header: SystemReportHeader;
   settings?: PosMobileSettings | null;
   /** Which catalog report this data came from — used to trim wide reports down
-   * to their highest-value columns (see reportColumnFilters). */
-  reportType: SystemReportType;
+   * to their highest-value columns (see reportColumnFilters). Omit for a
+   * report with no curated allowlist entry (all columns are shown as-is). */
+  reportType?: SystemReportType;
   /** Tapping a row whose data includes a numeric `id` (sales_report and
    * return_report rows only — see ReportService::salesDetails) opens that
    * transaction's real, printable receipt. */

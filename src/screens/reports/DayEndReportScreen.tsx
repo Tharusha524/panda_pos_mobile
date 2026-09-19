@@ -1,17 +1,37 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { RefreshControl } from 'react-native';
-import { Box, HStack, Text, VStack } from '@gluestack-ui/themed';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { RefreshControl, View } from 'react-native';
+import ViewShot, { type ViewShotRef } from 'react-native-view-shot';
+import { Box, Text } from '@gluestack-ui/themed';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { AppHeader } from '@/components/common/AppHeader';
 import { LoadingOverlay } from '@/components/common/LoadingOverlay';
+import { PrimaryButton } from '@/components/buttons/PrimaryButton';
 import { ReportFilterBar } from '@/components/reports/ReportFilterBar';
+import { BackendReportView } from '@/components/reports/BackendReportView';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
+import { usePosSettings } from '@/context/PosSettingsContext';
 import { reportService } from '@/services/api/reportService';
 import { inventoryService } from '@/services/api/inventoryService';
-import { formatDateYmd, formatReportDateLabel } from '@/utils/reportDateFilters';
+import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
+import { navigateToPrinterSetup } from '@/navigation/navigationRef';
+import { downloadReportTableExcel, shareReportTableExcel } from '@/utils/reportTableFile';
+import { captureReceiptBase64 } from '@/utils/receiptImageShare';
+import {
+  buildPrintHeaderFromSettings as buildHeader,
+  getReceiptPrintCustomization,
+} from '@/utils/receiptPrintCustomization';
+import {
+  formatDateYmd,
+  formatReportDateLabel,
+  formatReportDateRangeLabel,
+} from '@/utils/reportDateFilters';
 import type { ReportFilterParams } from '@/types/reportFilters';
-import { colors, typography } from '@/theme';
+import type { BackendReportData } from '@/types/backendReports';
+import { colors } from '@/theme';
+
+const isPrinterSetupError = (msg: string): boolean =>
+  /no printer|not configured|settings/i.test(msg);
 
 interface DayEndRow {
   key: string;
@@ -26,7 +46,12 @@ const rowKey = (itemNumber: string | null | undefined, description: string | nul
   (itemNumber?.trim() || description?.trim() || 'unknown').toUpperCase();
 
 export const DayEndReportScreen: React.FC = () => {
-  const { showError } = useErrorDialog();
+  const { showError, showConfirm } = useErrorDialog();
+  const { settings, currency } = usePosSettings();
+  const header = useMemo(() => buildHeader(settings), [settings]);
+  const [printing, setPrinting] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState<'download' | 'share' | null>(null);
+  const reportShotRef = useRef<ViewShotRef>(null);
   const today = formatDateYmd(new Date());
   const [filters, setFilters] = useState<ReportFilterParams>({
     dateFrom: today,
@@ -155,6 +180,116 @@ export const DayEndReportScreen: React.FC = () => {
       ? formatReportDateLabel(filters.dateFrom)
       : `${formatReportDateLabel(filters.dateFrom)} — ${formatReportDateLabel(filters.dateTo)}`;
 
+  // Print/Excel reuse the same flat-table report shape the other report
+  // pages use (BackendReportView / reportTableFile), built here from the
+  // rows already computed above instead of a second backend round trip.
+  const reportData: BackendReportData = useMemo(
+    () => ({
+      title: 'Day End Report',
+      generated_at: new Date().toISOString(),
+      filters: {
+        date_from: filters.dateFrom,
+        date_to: filters.dateTo,
+        branch_id: null,
+        branch_name: filters.location === 'all' ? 'All branches' : filters.location,
+      },
+      summary: [
+        { label: 'Total start stock', value: totals.start },
+        { label: 'Total sold', value: totals.sold },
+        { label: 'Total remaining', value: totals.remaining },
+      ],
+      columns: [
+        { key: 'item_number', label: 'Item No' },
+        { key: 'description', label: 'Item' },
+        { key: 'start', label: 'Start' },
+        { key: 'sold', label: 'Sold' },
+        { key: 'remaining', label: 'Left' },
+      ],
+      rows: rows.map(row => ({
+        item_number: row.itemNumber ?? '',
+        description: row.description,
+        start: row.start,
+        sold: row.sold,
+        remaining: row.remaining,
+      })),
+    }),
+    [rows, totals, filters.dateFrom, filters.dateTo, filters.location],
+  );
+
+  const promptPrinterSetup = (message: string) => {
+    showConfirm({
+      title: 'Printer not set up',
+      message,
+      confirmLabel: 'Open printer setup',
+      cancelLabel: 'Cancel',
+      onConfirm: () => navigateToPrinterSetup(),
+    });
+  };
+
+  const handlePrint = async () => {
+    if (rows.length === 0) {
+      return;
+    }
+    if (!bluetoothPrintService.isSupported()) {
+      promptPrinterSetup(
+        'Bluetooth printing is not available on this device.\n\nConfigure a receipt printer in Settings → Receipt printer.',
+      );
+      return;
+    }
+    setPrinting(true);
+    try {
+      let capturedImageBase64: string | undefined;
+      try {
+        const customization = await getReceiptPrintCustomization(settings);
+        if (customization.printAsImage) {
+          capturedImageBase64 = await captureReceiptBase64(reportShotRef);
+        }
+      } catch {
+        // Couldn't read the setting or capture the preview — fall back to
+        // the normal text report below instead of blocking the print.
+      }
+      await bluetoothPrintService.printBackendReport(
+        reportData,
+        header,
+        currency,
+        settings,
+        capturedImageBase64,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Print failed';
+      if (isPrinterSetupError(msg)) {
+        promptPrinterSetup(
+          `${msg}\n\nConfigure your portable printer once in Settings → Receipt printer.`,
+        );
+      } else {
+        showError({ title: 'Print', message: msg, variant: 'warning' });
+      }
+    } finally {
+      setPrinting(false);
+    }
+  };
+
+  const handleExportExcel = async (action: 'download' | 'share') => {
+    const dateKey = `${filters.dateFrom}_to_${filters.dateTo}`;
+    const dateLabel = formatReportDateRangeLabel(filters.dateFrom, filters.dateTo);
+    setExportingExcel(action);
+    try {
+      if (action === 'download') {
+        const message = await downloadReportTableExcel(reportData, dateKey, dateLabel);
+        showError({ title: 'Excel saved', message, variant: 'info', confirmLabel: 'OK' });
+      } else {
+        await shareReportTableExcel(reportData, dateKey, dateLabel);
+      }
+    } catch (e) {
+      showError({
+        title: 'Excel export',
+        message: e instanceof Error ? e.message : 'Could not export the Excel report',
+      });
+    } finally {
+      setExportingExcel(null);
+    }
+  };
+
   return (
     <ScreenContainer>
       <AppHeader title="Day End Report" subtitle={subtitle} showBack />
@@ -177,94 +312,54 @@ export const DayEndReportScreen: React.FC = () => {
         <ReportFilterBar filters={filters} onChange={setFilters} showItemFilter={false} />
 
         <Box w="100%" maxWidth={480}>
-          <Box
-            bg={colors.white}
-            borderRadius="$xl"
-            borderWidth={1}
-            borderColor={colors.border}
-            overflow="hidden"
-            mt="$3">
-            <HStack bg={colors.backgroundAlt} px="$3" py="$2" borderBottomWidth={1} borderColor={colors.border}>
-              <Text style={[typography.label, styles.colItem]} color={colors.textSecondary}>
-                Item
+          {rows.length === 0 && !loading ? (
+            <Box bg={colors.white} borderRadius="$xl" borderWidth={1} borderColor={colors.border} px="$4" py="$8" mt="$3">
+              <Text textAlign="center" color={colors.textMuted}>
+                No stock or sales for this selection.
               </Text>
-              <Text style={[typography.label, styles.colNum]} color={colors.textSecondary}>
-                Start
-              </Text>
-              <Text style={[typography.label, styles.colNum]} color={colors.textSecondary}>
-                Sold
-              </Text>
-              <Text style={[typography.label, styles.colNum]} color={colors.textSecondary}>
-                Left
-              </Text>
-            </HStack>
-
-            {rows.length === 0 && !loading ? (
-              <Box px="$4" py="$8">
-                <Text textAlign="center" color={colors.textMuted}>
-                  No stock or sales for this selection.
-                </Text>
-              </Box>
-            ) : (
-              rows.map(row => (
-                <HStack
-                  key={row.key}
-                  px="$3"
-                  py="$2.5"
-                  borderBottomWidth={1}
-                  borderColor={colors.border}>
-                  <VStack style={styles.colItem}>
-                    <Text fontWeight="$semibold" color={colors.text} numberOfLines={1}>
-                      {row.description}
-                    </Text>
-                    {row.itemNumber ? (
-                      <Text size="xs" color={colors.textMuted}>
-                        {row.itemNumber}
-                      </Text>
-                    ) : null}
-                  </VStack>
-                  <Text style={styles.colNum} color={colors.text}>
-                    {row.start}
-                  </Text>
-                  <Text style={styles.colNum} color={colors.text}>
-                    {row.sold}
-                  </Text>
-                  <Text style={styles.colNum} color={colors.text} fontWeight="$semibold">
-                    {row.remaining}
-                  </Text>
-                </HStack>
-              ))
-            )}
-
-            {rows.length > 0 ? (
-              <HStack bg={colors.backgroundAlt} px="$3" py="$2.5">
-                <Text style={[typography.label, styles.colItem]} color={colors.text}>
-                  Total
-                </Text>
-                <Text style={styles.colNum} fontWeight="$bold" color={colors.text}>
-                  {totals.start}
-                </Text>
-                <Text style={styles.colNum} fontWeight="$bold" color={colors.text}>
-                  {totals.sold}
-                </Text>
-                <Text style={styles.colNum} fontWeight="$bold" color={colors.text}>
-                  {totals.remaining}
-                </Text>
-              </HStack>
-            ) : null}
-          </Box>
+            </Box>
+          ) : rows.length > 0 ? (
+            <View collapsable={false}>
+              <ViewShot
+                ref={reportShotRef}
+                options={{ format: 'png', quality: 1, result: 'tmpfile' }}
+                style={{ backgroundColor: '#fff' }}>
+                <BackendReportView report={reportData} header={header} settings={settings} />
+              </ViewShot>
+            </View>
+          ) : null}
 
           <Text size="xs" color={colors.textMuted} mt="$3" px="$1">
             Start stock is derived (Left + Sold) for the selected date, so it always balances even if the
             lorry was loaded more than once that day.
           </Text>
+
+          {rows.length > 0 ? (
+            <Box gap="$2" mt="$4" mb="$2">
+              <PrimaryButton
+                label={printing ? 'Printing…' : 'Print via Bluetooth'}
+                onPress={handlePrint}
+                loading={printing}
+                disabled={printing}
+              />
+              <PrimaryButton
+                label={exportingExcel === 'download' ? 'Saving…' : 'Download Excel'}
+                variant="outline"
+                onPress={() => handleExportExcel('download')}
+                loading={exportingExcel === 'download'}
+                disabled={exportingExcel != null}
+              />
+              <PrimaryButton
+                label={exportingExcel === 'share' ? 'Sharing…' : 'Share Excel'}
+                variant="outline"
+                onPress={() => handleExportExcel('share')}
+                loading={exportingExcel === 'share'}
+                disabled={exportingExcel != null}
+              />
+            </Box>
+          ) : null}
         </Box>
       </SmoothScrollView>
     </ScreenContainer>
   );
-};
-
-const styles = {
-  colItem: { flex: 2 },
-  colNum: { flex: 1, textAlign: 'right' as const },
 };

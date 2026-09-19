@@ -24,10 +24,10 @@ const REPORT_COLUMN_ALLOWLIST: Partial<Record<SystemReportType, string[]>> = {
 /** Filters (and reorders) report columns down to the curated allowlist for the
  * given report type. Reports without an allowlist entry are returned unchanged. */
 export const filterReportColumns = (
-  type: SystemReportType,
+  type: SystemReportType | undefined,
   columns: ReportColumn[],
 ): ReportColumn[] => {
-  const keep = REPORT_COLUMN_ALLOWLIST[type];
+  const keep = type ? REPORT_COLUMN_ALLOWLIST[type] : undefined;
   if (!keep) {
     return columns;
   }

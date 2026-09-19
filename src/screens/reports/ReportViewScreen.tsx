@@ -147,11 +147,12 @@ export const ReportViewScreen: React.FC = () => {
   // Credit portion) after fetching.
   const isCreditSales = params.type === 'credit_sales';
   const pivotExcelSupported = isDailySummary || isSalesReport || isReturnReport || isCreditSales;
-  // Customer Settlement is already a flat column/row table (see
-  // reportPayload on the backend) — exported as-is via the generic table
-  // exporter instead of the item-level sales pivot above.
+  // Customer Settlement and Cash in Hand are already flat column/row tables
+  // (see reportPayload on the backend) — exported as-is via the generic
+  // table exporter instead of the item-level sales pivot above.
   const isCustomerSettlement = params.type === 'customer_settlement';
-  const genericExcelSupported = isCustomerSettlement;
+  const isCashInHand = params.type === 'cash_in_hand';
+  const genericExcelSupported = isCustomerSettlement || isCashInHand;
   const excelExportSupported = pivotExcelSupported || genericExcelSupported;
   const [dailySalesReport, setDailySalesReport] = useState<BackendReportData | null>(null);
   const [dailySalesLoading, setDailySalesLoading] = useState(false);
