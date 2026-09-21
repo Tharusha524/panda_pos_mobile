@@ -5,6 +5,7 @@ import type {
   StockTransferItemOption,
   StockTransferPayload,
   StockTransferResult,
+  StockTransferSummaryRow,
 } from '@/types/stockTransfer';
 
 export const stockTransferService = {
@@ -35,6 +36,24 @@ export const stockTransferService = {
     );
     if (!data.success) {
       throw new Error(data.message ?? 'Failed to search items');
+    }
+    return data.data ?? [];
+  },
+
+  /** Qty transferred INTO `toLocation` per item over a date range — powers
+   * the Day End Report's "Start" column (what was actually loaded onto the
+   * lorry that day), instead of a derived Left+Sold guess. */
+  async summary(
+    toLocation: string,
+    dateFrom: string,
+    dateTo: string,
+  ): Promise<StockTransferSummaryRow[]> {
+    const { data } = await apiClient.get<ApiSuccessResponse<StockTransferSummaryRow[]>>(
+      '/stock-transfers/summary',
+      { params: { to_location: toLocation, date_from: dateFrom, date_to: dateTo } },
+    );
+    if (!data.success) {
+      throw new Error(data.message ?? 'Failed to load stock transfer summary');
     }
     return data.data ?? [];
   },

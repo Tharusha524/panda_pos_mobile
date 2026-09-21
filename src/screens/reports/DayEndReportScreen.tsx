@@ -13,6 +13,7 @@ import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { reportService } from '@/services/api/reportService';
 import { inventoryService } from '@/services/api/inventoryService';
+import { stockTransferService } from '@/services/api/stockTransferService';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { navigateToPrinterSetup } from '@/navigation/navigationRef';
 import { downloadReportTableExcel, shareReportTableExcel } from '@/utils/reportTableFile';
@@ -74,7 +75,7 @@ export const DayEndReportScreen: React.FC = () => {
 
     (async () => {
       try {
-        const [salesReport, inventory] = await Promise.all([
+        const [salesReport, inventory, transferSummary] = await Promise.all([
           reportService.fetch('sales-summary', {
             dateFrom: filters.dateFrom,
             dateTo: filters.dateTo,
@@ -83,8 +84,24 @@ export const DayEndReportScreen: React.FC = () => {
           inventoryService.list({
             location: filters.location !== 'all' ? filters.location : undefined,
           }),
+          stockTransferService.summary(filters.location, filters.dateFrom, filters.dateTo),
         ]);
         if (cancelled) return;
+
+        const startByKey = new Map<string, { itemNumber: string | null; description: string; qty: number }>();
+        for (const row of transferSummary) {
+          const key = rowKey(row.item_number, row.description);
+          const existing = startByKey.get(key);
+          if (existing) {
+            existing.qty += row.qty;
+          } else {
+            startByKey.set(key, {
+              itemNumber: row.item_number,
+              description: row.description?.trim() || 'Unnamed item',
+              qty: row.qty,
+            });
+          }
+        }
 
         const soldByKey = new Map<string, { itemNumber: string | null; description: string; qty: number }>();
         for (const sale of salesReport.sales ?? []) {
@@ -116,24 +133,34 @@ export const DayEndReportScreen: React.FC = () => {
           });
         }
 
-        const allKeys = new Set<string>([...soldByKey.keys(), ...remainingByKey.keys()]);
+        const allKeys = new Set<string>([
+          ...startByKey.keys(),
+          ...soldByKey.keys(),
+          ...remainingByKey.keys(),
+        ]);
         const built: DayEndRow[] = Array.from(allKeys).map(key => {
           const sold = soldByKey.get(key)?.qty ?? 0;
           const remaining = remainingByKey.get(key)?.qty ?? 0;
           const description =
-            remainingByKey.get(key)?.description ?? soldByKey.get(key)?.description ?? 'Unnamed item';
-          const itemNumber = remainingByKey.get(key)?.itemNumber ?? soldByKey.get(key)?.itemNumber ?? null;
+            remainingByKey.get(key)?.description ??
+            soldByKey.get(key)?.description ??
+            startByKey.get(key)?.description ??
+            'Unnamed item';
+          const itemNumber =
+            remainingByKey.get(key)?.itemNumber ??
+            soldByKey.get(key)?.itemNumber ??
+            startByKey.get(key)?.itemNumber ??
+            null;
           return {
             key,
             itemNumber,
             description,
             sold,
             remaining,
-            // Start stock = whatever's left now plus whatever was sold today —
-            // derived rather than pulled from a separate transfer history, so
-            // it always balances (Start − Sold = Remaining) regardless of how
-            // many times the lorry was loaded that day.
-            start: remaining + sold,
+            // Start stock = actual qty transferred to this branch on the
+            // selected date (from stock transfer records) — 0 for an item
+            // that wasn't loaded that day, even if it still has stock left.
+            start: startByKey.get(key)?.qty ?? 0,
           };
         });
 
@@ -216,6 +243,32 @@ export const DayEndReportScreen: React.FC = () => {
     [rows, totals, filters.dateFrom, filters.dateTo, filters.location],
   );
 
+  // Item No stays in the Excel export (reportData above) but is dropped from
+  // the on-screen table and the printed receipt — both render via
+  // BackendReportView, so this trimmed-down version feeds that component.
+  // A "Total" row is appended here only (not in reportData/Excel, which
+  // already gets its own summary section) so the on-screen table and print
+  // both end with a totals row at the bottom, like before.
+  const displayReportData: BackendReportData = useMemo(
+    () => ({
+      ...reportData,
+      columns: reportData.columns.filter(col => col.key !== 'item_number'),
+      rows:
+        rows.length > 0
+          ? [
+              ...reportData.rows,
+              {
+                description: 'Total',
+                start: totals.start,
+                sold: totals.sold,
+                remaining: totals.remaining,
+              },
+            ]
+          : reportData.rows,
+    }),
+    [reportData, rows.length, totals],
+  );
+
   const promptPrinterSetup = (message: string) => {
     showConfirm({
       title: 'Printer not set up',
@@ -249,7 +302,7 @@ export const DayEndReportScreen: React.FC = () => {
         // the normal text report below instead of blocking the print.
       }
       await bluetoothPrintService.printBackendReport(
-        reportData,
+        displayReportData,
         header,
         currency,
         settings,
@@ -324,14 +377,14 @@ export const DayEndReportScreen: React.FC = () => {
                 ref={reportShotRef}
                 options={{ format: 'png', quality: 1, result: 'tmpfile' }}
                 style={{ backgroundColor: '#fff' }}>
-                <BackendReportView report={reportData} header={header} settings={settings} />
+                <BackendReportView report={displayReportData} header={header} settings={settings} />
               </ViewShot>
             </View>
           ) : null}
 
           <Text size="xs" color={colors.textMuted} mt="$3" px="$1">
-            Start stock is derived (Left + Sold) for the selected date, so it always balances even if the
-            lorry was loaded more than once that day.
+            Start is the qty actually transferred to this branch on the selected date — 0 for an item that
+            wasn't loaded that day, even if some is still left in stock.
           </Text>
 
           {rows.length > 0 ? (

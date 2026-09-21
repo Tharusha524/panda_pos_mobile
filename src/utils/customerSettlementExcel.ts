@@ -20,6 +20,7 @@ interface SettlementRow {
   cheque_number?: string | null;
   bank_name?: string | null;
   route?: string | null;
+  payment_date?: string | null;
 }
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
@@ -47,6 +48,7 @@ export async function buildCustomerSettlementWorkbookBase64(
   const hasCheque = methods.includes('Cheque');
 
   const columns = [
+    'Date',
     'Route',
     'Customer Name',
     'Bill No',
@@ -87,7 +89,12 @@ export async function buildCustomerSettlementWorkbookBase64(
 
   for (const row of rows) {
     const method = row.payment_method?.trim() || 'Other';
-    const values: (string | number)[] = [row.route ?? '', row.customer, row.bill_number ?? ''];
+    const values: (string | number)[] = [
+      row.payment_date ?? '',
+      row.route ?? '',
+      row.customer,
+      row.bill_number ?? '',
+    ];
     for (const m of methods) {
       values.push(m === method ? row.amount_received : '');
     }
@@ -100,7 +107,7 @@ export async function buildCustomerSettlementWorkbookBase64(
   }
 
   // Totals row — per method, matching the client's example layout.
-  const totalValues: (string | number)[] = ['', '', 'Total'];
+  const totalValues: (string | number)[] = ['', '', '', 'Total'];
   for (const m of methods) {
     totalValues.push(methodTotals[m] ?? 0);
   }

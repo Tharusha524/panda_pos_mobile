@@ -43,3 +43,9 @@ export interface StockTransferResult {
   transfer_date: string;
   lines: StockTransferResultLine[];
 }
+
+export interface StockTransferSummaryRow {
+  item_number: string;
+  description: string;
+  qty: number;
+}

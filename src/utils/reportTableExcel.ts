@@ -15,6 +15,16 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
 const safeSheetName = (title: string): string =>
   (title || 'Report').replace(/[\\/?*[\]]/g, ' ').slice(0, 31) || 'Report';
 
+/** Excel-native number format: "Rs. " prefix, thousands commas, 2 decimals
+ * (negative values keep the prefix, wrapped in parentheses) — applied to
+ * any column that looks like a money amount (e.g. Cash in Hand's "amount"). */
+const CURRENCY_NUM_FMT = '"Rs. "#,##0.00;"Rs. "-#,##0.00';
+
+const isCurrencyColumnKey = (key: string): boolean => {
+  const k = key.toLowerCase();
+  return k.endsWith('amount') || k === 'balance' || k.endsWith('_balance');
+};
+
 /** Builds a plain flat-table .xlsx (title row, one header row from
  * report.columns, one row per report.rows, summary totals at the bottom) —
  * for reports whose data is already a simple column/row table (Customer
@@ -54,8 +64,18 @@ export async function buildReportTableWorkbookBase64(
   });
 
   // Data rows
+  const currencyColIndexes = columns
+    .map((c, idx) => (isCurrencyColumnKey(c.key) ? idx + 1 : null))
+    .filter((idx): idx is number => idx !== null);
+
   for (const row of rows) {
-    ws.addRow(columns.map(c => row[c.key] ?? ''));
+    const dataRow = ws.addRow(columns.map(c => row[c.key] ?? ''));
+    for (const colIdx of currencyColIndexes) {
+      const cell = dataRow.getCell(colIdx);
+      if (typeof cell.value === 'number') {
+        cell.numFmt = CURRENCY_NUM_FMT;
+      }
+    }
   }
 
   // Borders across the data table.
