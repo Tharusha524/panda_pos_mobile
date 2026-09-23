@@ -57,6 +57,10 @@ export interface InventoryItem {
   sellable_qty?: number;
   expired_stock_qty?: number;
   uom?: string;
+  /** Packets that make up one bundle of this item — set per item on the
+   * web (Items → Edit → Stock Details), since it varies by item and can
+   * change over time. Null/undefined = not configured for this item. */
+  packets_per_bundle?: number | null;
   sku?: string | null;
   image_url?: string | null;
   expiry_date?: string | null;

@@ -16,19 +16,24 @@ export const useInventory = () => {
   const [categoryId, setCategoryId] = useState<number | 'all'>('all');
   const [subCategoryId, setSubCategoryId] = useState<number | 'all'>('all');
   const [search, setSearch] = useState('');
+  const [location, setLocation] = useState('all');
+  const [locations, setLocations] = useState<string[]>([]);
 
-  const load = useCallback(async (silent = false) => {
+  const load = useCallback(async (silent = false, forLocation = location) => {
     if (!silent) {
       setLoading(true);
       setError(null);
     }
     try {
       const [list, categoryResult] = await Promise.all([
-        inventoryService.list(),
+        inventoryService.list({
+          location: forLocation !== 'all' ? forLocation : undefined,
+        }),
         inventoryService.getCategories({ location: 'all' }),
       ]);
 
       setItems(list.items);
+      setLocations(list.filters?.locations ?? []);
       setCategories(
         mergeCategoryLists(
           categoryResult,
@@ -47,14 +52,16 @@ export const useInventory = () => {
         setLoading(false);
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    load(false);
-  }, [load]);
+    load(false, location);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location]);
 
   useAutoRefresh({
-    onRefresh: silent => load(silent),
+    onRefresh: silent => load(silent, location),
     scopes: ['inventory', 'sales', 'dashboard', 'purchases', 'reports'],
   });
 
@@ -151,6 +158,9 @@ export const useInventory = () => {
     subCategoryOptions,
     search,
     setSearch,
-    refresh: () => load(false),
+    location,
+    setLocation,
+    locations,
+    refresh: () => load(false, location),
   };
 };

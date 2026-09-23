@@ -1,14 +1,15 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { RefreshControl, TextInput } from 'react-native';
 import { Box, HStack, Pressable, Text, VStack } from '@gluestack-ui/themed';
 import { SmoothFlatList } from '@/components/common/SmoothFlatList';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Package, SlidersHorizontal, Truck } from 'lucide-react-native';
+import { ChevronRight, MapPin, Package, SlidersHorizontal, Truck } from 'lucide-react-native';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { AppHeader } from '@/components/common/AppHeader';
 import { PosCategoryBar } from '@/components/sales/PosCategoryBar';
 import { LoadingOverlay } from '@/components/common/LoadingOverlay';
+import { SelectionModal, type SelectionOption } from '@/components/common/SelectionModal';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { useInventory } from '@/hooks/useInventory';
@@ -24,6 +25,15 @@ export const ProductsScreen: React.FC = () => {
   const { showError } = useErrorDialog();
   const { currency } = usePosSettings();
   const inv = useInventory();
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+
+  const locationOptions: SelectionOption[] = useMemo(
+    () => [
+      { id: 'all', label: 'All branches' },
+      ...inv.locations.map(loc => ({ id: loc, label: loc })),
+    ],
+    [inv.locations],
+  );
 
   useEffect(() => {
     if (inv.error) {
@@ -84,6 +94,28 @@ export const ProductsScreen: React.FC = () => {
 
   const listHeader = (
     <Box px="$4" pb="$2" gap="$2" pt="$1">
+      {inv.locations.length > 1 ? (
+        <Pressable
+          onPress={() => setLocationPickerOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel={inv.location !== 'all' ? `Branch ${inv.location}` : 'All branches'}>
+          <HStack
+            alignItems="center"
+            gap="$2"
+            bg={colors.white}
+            borderWidth={1}
+            borderColor={colors.border}
+            borderRadius="$xl"
+            px="$3"
+            py="$2.5">
+            <MapPin size={16} color={colors.primary} />
+            <Text flex={1} color={colors.text} fontWeight="$semibold" numberOfLines={1}>
+              {inv.location !== 'all' ? inv.location : 'All branches'}
+            </Text>
+            <ChevronRight size={16} color={colors.primaryLight} />
+          </HStack>
+        </Pressable>
+      ) : null}
       {inv.categories.length > 0 ? (
         <PosCategoryBar
           categories={inv.categories}
@@ -146,6 +178,17 @@ export const ProductsScreen: React.FC = () => {
             </Box>
           ) : null
         }
+      />
+
+      <SelectionModal
+        visible={locationPickerOpen}
+        title="Select branch"
+        options={locationOptions}
+        onSelect={opt => {
+          inv.setLocation(opt.id);
+          setLocationPickerOpen(false);
+        }}
+        onClose={() => setLocationPickerOpen(false)}
       />
     </ScreenContainer>
   );

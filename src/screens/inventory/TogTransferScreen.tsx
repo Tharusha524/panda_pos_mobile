@@ -104,7 +104,7 @@ export const TogTransferScreen: React.FC = () => {
   const addLine = (item: StockTransferItemOption) => {
     setLines(prev => {
       if (prev.some(l => l.item.id === item.id)) return prev;
-      return [...prev, { item, qty: '1' }];
+      return [...prev, { item, qty: '' }];
     });
   };
 
@@ -175,7 +175,7 @@ export const TogTransferScreen: React.FC = () => {
       <AppHeader title="TOG transfer" subtitle="Move stock between branches" showBack />
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={insets.top}>
         <SmoothScrollView
           contentContainerStyle={[

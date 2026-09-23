@@ -1,14 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { RefreshControl, View } from 'react-native';
+import { RefreshControl, StyleSheet, View } from 'react-native';
 import ViewShot, { type ViewShotRef } from 'react-native-view-shot';
-import { Box, Text } from '@gluestack-ui/themed';
+import { Box, HStack, Text, VStack } from '@gluestack-ui/themed';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { AppHeader } from '@/components/common/AppHeader';
 import { LoadingOverlay } from '@/components/common/LoadingOverlay';
 import { PrimaryButton } from '@/components/buttons/PrimaryButton';
 import { ReportFilterBar } from '@/components/reports/ReportFilterBar';
-import { BackendReportView } from '@/components/reports/BackendReportView';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { reportService } from '@/services/api/reportService';
@@ -16,7 +15,7 @@ import { inventoryService } from '@/services/api/inventoryService';
 import { stockTransferService } from '@/services/api/stockTransferService';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { navigateToPrinterSetup } from '@/navigation/navigationRef';
-import { downloadReportTableExcel, shareReportTableExcel } from '@/utils/reportTableFile';
+import { downloadDayEndReportExcel, shareDayEndReportExcel } from '@/utils/dayEndReportFile';
 import { captureReceiptBase64 } from '@/utils/receiptImageShare';
 import {
   buildPrintHeaderFromSettings as buildHeader,
@@ -29,7 +28,7 @@ import {
 } from '@/utils/reportDateFilters';
 import type { ReportFilterParams } from '@/types/reportFilters';
 import type { BackendReportData } from '@/types/backendReports';
-import { colors } from '@/theme';
+import { colors, typography } from '@/theme';
 
 const isPrinterSetupError = (msg: string): boolean =>
   /no printer|not configured|settings/i.test(msg);
@@ -41,6 +40,9 @@ interface DayEndRow {
   sold: number;
   remaining: number;
   start: number;
+  /** Packets per bundle set on THIS item (Items → Edit → Stock Details) —
+   * null when not configured, so Bundle shows as "—" instead of a guess. */
+  packetsPerBundle: number | null;
 }
 
 const rowKey = (itemNumber: string | null | undefined, description: string | null | undefined): string =>
@@ -123,13 +125,17 @@ export const DayEndReportScreen: React.FC = () => {
           }
         }
 
-        const remainingByKey = new Map<string, { itemNumber: string | null; description: string; qty: number }>();
+        const remainingByKey = new Map<
+          string,
+          { itemNumber: string | null; description: string; qty: number; packetsPerBundle: number | null }
+        >();
         for (const item of inventory.items ?? []) {
           const key = rowKey(item.item_number, item.description);
           remainingByKey.set(key, {
             itemNumber: item.item_number ?? null,
             description: item.description?.trim() || 'Unnamed item',
             qty: item.qty ?? 0,
+            packetsPerBundle: item.packets_per_bundle ?? null,
           });
         }
 
@@ -161,6 +167,7 @@ export const DayEndReportScreen: React.FC = () => {
             // selected date (from stock transfer records) — 0 for an item
             // that wasn't loaded that day, even if it still has stock left.
             start: startByKey.get(key)?.qty ?? 0,
+            packetsPerBundle: remainingByKey.get(key)?.packetsPerBundle ?? null,
           };
         });
 
@@ -207,10 +214,18 @@ export const DayEndReportScreen: React.FC = () => {
       ? formatReportDateLabel(filters.dateFrom)
       : `${formatReportDateLabel(filters.dateFrom)} — ${formatReportDateLabel(filters.dateTo)}`;
 
-  // Print/Excel reuse the same flat-table report shape the other report
-  // pages use (BackendReportView / reportTableFile), built here from the
-  // rows already computed above instead of a second backend round trip.
-  const reportData: BackendReportData = useMemo(
+  // Excel gets the full two-row-header Bundle/Pkts layout via a dedicated
+  // builder (dayEndReportExcel) — it needs merged group headers the generic
+  // flat-table exporter can't do. Item No stays in Excel but is dropped
+  // from the print/on-screen text fallback below, same as before.
+  const dateLabel = useMemo(
+    () => formatReportDateRangeLabel(filters.dateFrom, filters.dateTo),
+    [filters.dateFrom, filters.dateTo],
+  );
+
+  // Screen + print stay plain packets (no Bundle split) — only the Excel
+  // export (dayEndReportExcel) shows the Bundle/Pkts breakdown.
+  const printReportData: BackendReportData = useMemo(
     () => ({
       title: 'Day End Report',
       generated_at: new Date().toISOString(),
@@ -226,14 +241,12 @@ export const DayEndReportScreen: React.FC = () => {
         { label: 'Total remaining', value: totals.remaining },
       ],
       columns: [
-        { key: 'item_number', label: 'Item No' },
         { key: 'description', label: 'Item' },
         { key: 'start', label: 'Start' },
         { key: 'sold', label: 'Sold' },
         { key: 'remaining', label: 'Left' },
       ],
       rows: rows.map(row => ({
-        item_number: row.itemNumber ?? '',
         description: row.description,
         start: row.start,
         sold: row.sold,
@@ -241,32 +254,6 @@ export const DayEndReportScreen: React.FC = () => {
       })),
     }),
     [rows, totals, filters.dateFrom, filters.dateTo, filters.location],
-  );
-
-  // Item No stays in the Excel export (reportData above) but is dropped from
-  // the on-screen table and the printed receipt — both render via
-  // BackendReportView, so this trimmed-down version feeds that component.
-  // A "Total" row is appended here only (not in reportData/Excel, which
-  // already gets its own summary section) so the on-screen table and print
-  // both end with a totals row at the bottom, like before.
-  const displayReportData: BackendReportData = useMemo(
-    () => ({
-      ...reportData,
-      columns: reportData.columns.filter(col => col.key !== 'item_number'),
-      rows:
-        rows.length > 0
-          ? [
-              ...reportData.rows,
-              {
-                description: 'Total',
-                start: totals.start,
-                sold: totals.sold,
-                remaining: totals.remaining,
-              },
-            ]
-          : reportData.rows,
-    }),
-    [reportData, rows.length, totals],
   );
 
   const promptPrinterSetup = (message: string) => {
@@ -302,7 +289,7 @@ export const DayEndReportScreen: React.FC = () => {
         // the normal text report below instead of blocking the print.
       }
       await bluetoothPrintService.printBackendReport(
-        displayReportData,
+        printReportData,
         header,
         currency,
         settings,
@@ -324,14 +311,21 @@ export const DayEndReportScreen: React.FC = () => {
 
   const handleExportExcel = async (action: 'download' | 'share') => {
     const dateKey = `${filters.dateFrom}_to_${filters.dateTo}`;
-    const dateLabel = formatReportDateRangeLabel(filters.dateFrom, filters.dateTo);
+    const excelRows = rows.map(row => ({
+      itemNumber: row.itemNumber,
+      description: row.description,
+      start: row.start,
+      sold: row.sold,
+      remaining: row.remaining,
+      packetsPerBundle: row.packetsPerBundle,
+    }));
     setExportingExcel(action);
     try {
       if (action === 'download') {
-        const message = await downloadReportTableExcel(reportData, dateKey, dateLabel);
+        const message = await downloadDayEndReportExcel(excelRows, dateKey, dateLabel, totals);
         showError({ title: 'Excel saved', message, variant: 'info', confirmLabel: 'OK' });
       } else {
-        await shareReportTableExcel(reportData, dateKey, dateLabel);
+        await shareDayEndReportExcel(excelRows, dateKey, dateLabel, totals);
       }
     } catch (e) {
       showError({
@@ -377,7 +371,59 @@ export const DayEndReportScreen: React.FC = () => {
                 ref={reportShotRef}
                 options={{ format: 'png', quality: 1, result: 'tmpfile' }}
                 style={{ backgroundColor: '#fff' }}>
-                <BackendReportView report={displayReportData} header={header} settings={settings} />
+                <Box
+                  bg={colors.white}
+                  borderRadius="$xl"
+                  borderWidth={1}
+                  borderColor={colors.border}
+                  overflow="hidden"
+                  p="$3">
+                  <Text style={typography.h3} color={colors.text} textAlign="center" mb="$2">
+                    Day End Report
+                  </Text>
+                  <Text size="xs" color={colors.textMuted} textAlign="center" mb="$3">
+                    {dateLabel}
+                  </Text>
+
+                  <HStack bg={colors.backgroundAlt} px="$3" py="$2" borderBottomWidth={1} borderColor={colors.border}>
+                    <Text style={[typography.label, dayEndStyles.itemCol]} color={colors.textSecondary}>
+                      Item
+                    </Text>
+                    <Text style={[typography.label, dayEndStyles.subCol]} color={colors.textSecondary}>
+                      Start
+                    </Text>
+                    <Text style={[typography.label, dayEndStyles.subCol]} color={colors.textSecondary}>
+                      Sold
+                    </Text>
+                    <Text style={[typography.label, dayEndStyles.subCol]} color={colors.textSecondary}>
+                      Left
+                    </Text>
+                  </HStack>
+
+                  {rows.map(row => (
+                    <HStack
+                      key={row.key}
+                      px="$3"
+                      py="$2.5"
+                      borderBottomWidth={1}
+                      borderColor={colors.border}>
+                      <VStack style={dayEndStyles.itemCol}>
+                        <Text fontWeight="$semibold" color={colors.text} numberOfLines={1}>
+                          {row.description}
+                        </Text>
+                      </VStack>
+                      <Text style={dayEndStyles.subCol} color={colors.text}>
+                        {row.start}
+                      </Text>
+                      <Text style={dayEndStyles.subCol} color={colors.text}>
+                        {row.sold}
+                      </Text>
+                      <Text style={dayEndStyles.subCol} color={colors.text} fontWeight="$semibold">
+                        {row.remaining}
+                      </Text>
+                    </HStack>
+                  ))}
+                </Box>
               </ViewShot>
             </View>
           ) : null}
@@ -416,3 +462,8 @@ export const DayEndReportScreen: React.FC = () => {
     </ScreenContainer>
   );
 };
+
+const dayEndStyles = StyleSheet.create({
+  itemCol: { flex: 2 },
+  subCol: { flex: 1, textAlign: 'right' },
+});
