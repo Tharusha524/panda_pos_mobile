@@ -15,6 +15,7 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
 interface SettlementRow {
   customer: string;
   bill_number: string | null;
+  bill_date?: string | null;
   payment_method: string | null;
   amount_received: number;
   cheque_number?: string | null;
@@ -52,6 +53,7 @@ export async function buildCustomerSettlementWorkbookBase64(
     'Route',
     'Customer Name',
     'Bill No',
+    'Credited Date',
     ...methods,
     ...(hasCheque ? ['Ch.No', 'Bank'] : []),
   ];
@@ -94,6 +96,7 @@ export async function buildCustomerSettlementWorkbookBase64(
       row.route ?? '',
       row.customer,
       row.bill_number ?? '',
+      row.bill_date ?? '',
     ];
     for (const m of methods) {
       values.push(m === method ? row.amount_received : '');
@@ -107,7 +110,7 @@ export async function buildCustomerSettlementWorkbookBase64(
   }
 
   // Totals row — per method, matching the client's example layout.
-  const totalValues: (string | number)[] = ['', '', '', 'Total'];
+  const totalValues: (string | number)[] = ['', '', '', 'Total', ''];
   for (const m of methods) {
     totalValues.push(methodTotals[m] ?? 0);
   }

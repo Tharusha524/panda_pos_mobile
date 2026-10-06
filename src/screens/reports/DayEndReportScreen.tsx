@@ -107,19 +107,18 @@ export const DayEndReportScreen: React.FC = () => {
 
         const soldByKey = new Map<string, { itemNumber: string | null; description: string; qty: number }>();
         for (const sale of salesReport.sales ?? []) {
-          if (sale.transaction_label === 'Return') {
-            continue;
-          }
+          const isReturn = sale.transaction_label === 'Return';
           for (const line of sale.items ?? []) {
             const key = rowKey(line.item_number, line.description);
+            const delta = isReturn ? -line.qty : line.qty;
             const existing = soldByKey.get(key);
             if (existing) {
-              existing.qty += line.qty;
+              existing.qty += delta;
             } else {
               soldByKey.set(key, {
                 itemNumber: line.item_number,
                 description: line.description?.trim() || 'Unnamed item',
-                qty: line.qty,
+                qty: delta,
               });
             }
           }

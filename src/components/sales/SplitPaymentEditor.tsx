@@ -23,7 +23,9 @@ interface SplitPaymentEditorProps {
 }
 
 const isCredit = (method: string): boolean => /^credit$/i.test(method);
-const isChequeLike = (method: string): boolean => /cheque|bank transfer/i.test(method);
+const isCheque = (method: string): boolean => /cheque/i.test(method);
+const isBankTransfer = (method: string): boolean => /bank transfer/i.test(method);
+const isChequeLike = (method: string): boolean => isCheque(method) || isBankTransfer(method);
 
 const makeKey = (): string => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -118,14 +120,18 @@ export const SplitPaymentEditor: React.FC<SplitPaymentEditorProps> = ({
                 value={row.bankName}
                 onChangeText={t => updateRow(row.key, { bankName: t })}
                 style={[appInputStyle, styles.subField]}
-                placeholder="Bank name"
+                placeholder={isBankTransfer(row.paymentMethod) ? 'Bank account' : 'Bank name'}
                 placeholderTextColor={appInputPlaceholderColor}
               />
               <TextInput
                 value={row.chequeNumber}
                 onChangeText={t => updateRow(row.key, { chequeNumber: t })}
                 style={[appInputStyle, styles.subField]}
-                placeholder="Cheque number (optional)"
+                placeholder={
+                  isBankTransfer(row.paymentMethod)
+                    ? 'Reference / transaction ID'
+                    : 'Cheque number (optional)'
+                }
                 placeholderTextColor={appInputPlaceholderColor}
               />
             </>
