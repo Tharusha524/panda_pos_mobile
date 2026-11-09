@@ -15,6 +15,7 @@ import {
   Wallet,
   Receipt,
   FileText,
+  Lock,
 } from 'lucide-react-native';
 import { Card, Text } from 'react-native-paper';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
@@ -40,6 +41,8 @@ import { salesService } from '@/services/api/salesService';
 import { paymentService } from '@/services/api/paymentService';
 import { colors, TAB_BAR_SCROLL_PADDING } from '@/theme';
 import type { HomeStackParamList, MainTabParamList } from '@/navigation/types';
+import { MP, type MobilePermissionKey } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 type DashboardNav = CompositeNavigationProp<
   NativeStackNavigationProp<HomeStackParamList, 'Dashboard'>,
@@ -58,12 +61,26 @@ const QUICK_ACTIONS = [
   { id: 'reports', label: 'Reports', subtitle: 'View & print', icon: FileText, color: colors.pastelBlue },
 ] as const;
 
+const QUICK_ACTION_PERMISSION: Record<(typeof QUICK_ACTIONS)[number]['id'], MobilePermissionKey> = {
+  sale: MP.sales,
+  inventory: MP.products,
+  expenses: MP.expensesView,
+  expense_new: MP.expensesCreate,
+  customers: MP.customersView,
+  payment: MP.customersReceivePayment,
+  customer_new: MP.customersCreate,
+  purchases: MP.purchasesView,
+  reports: MP.reports,
+};
+
 export const DashboardScreen: React.FC = () => {
   const navigation = useNavigation<DashboardNav>();
   const { user, logout } = useAuth();
   const { currency } = usePosSettings();
   const { showErrorFromUnknown, showConfirm } = useErrorDialog();
   const { unreadCount } = useAppAlerts();
+  const { can, guard } = useMobileAccess();
+  const showFigures = can(MP.homeFigures);
   const {
     loading,
     refreshing,
@@ -146,11 +163,13 @@ export const DashboardScreen: React.FC = () => {
   const onTransactionPress = useCallback(
     async (item: RecentTransaction) => {
       if (item.type === 'expense') {
-        navigation.navigate('ExpensesList');
+        guard(MP.expensesView, () => navigation.navigate('ExpensesList'))();
         return;
       }
       if (item.type === 'purchase') {
-        navigation.navigate('Products', { screen: 'PurchasesList' });
+        guard(MP.purchasesView, () =>
+          navigation.navigate('Products', { screen: 'PurchasesList' }),
+        )();
         return;
       }
       if (item.type === 'sale' || item.type === 'return') {
@@ -177,9 +196,9 @@ export const DashboardScreen: React.FC = () => {
         }
         return;
       }
-      navigation.navigate('Sales');
+      guard(MP.sales, () => navigation.navigate('Sales'))();
     },
-    [navigation, showErrorFromUnknown],
+    [navigation, showErrorFromUnknown, guard],
   );
 
   const heroHint =
@@ -193,7 +212,7 @@ export const DashboardScreen: React.FC = () => {
       <DashboardHomeHeader
         userName={user?.name}
         alertCount={unreadCount}
-        onAlertsPress={() => navigation.navigate('AlertsList')}
+        onAlertsPress={guard(MP.homeAlerts, () => navigation.navigate('AlertsList'))}
         onLogout={handleLogout}
       />
 
@@ -209,6 +228,8 @@ export const DashboardScreen: React.FC = () => {
             colors={[colors.primary]}
           />
         }>
+        {showFigures ? (
+          <>
         <DashboardHero
           firstName={firstName}
           revenue={revenue}
@@ -241,7 +262,7 @@ export const DashboardScreen: React.FC = () => {
                 subtitle="Actual sale bills only"
                 icon={ShoppingCart}
                 variant="yellow"
-                onPress={() => navigation.navigate('TodayActivity', { tab: 'sales' })}
+                onPress={guard(MP.homeTodayActivity, () => navigation.navigate('TodayActivity', { tab: 'sales' }))}
               />
             </View>
             <View style={styles.metricHalf}>
@@ -254,10 +275,14 @@ export const DashboardScreen: React.FC = () => {
                 icon={Package}
                 variant="green"
                 subtitleColor={lowStock !== '0' ? colors.warning : colors.success}
-                onPress={() =>
+                onPress={
                   lowStock !== '0'
-                    ? navigation.navigate('TodayActivity', { tab: 'reorder' })
-                    : navigation.navigate('Products', { screen: 'ProductsList' })
+                    ? guard(MP.homeTodayActivity, () =>
+                        navigation.navigate('TodayActivity', { tab: 'reorder' }),
+                      )
+                    : guard(MP.products, () =>
+                        navigation.navigate('Products', { screen: 'ProductsList' }),
+                      )
                 }
               />
             </View>
@@ -274,7 +299,7 @@ export const DashboardScreen: React.FC = () => {
                 }
                 icon={Users}
                 accentColor={colors.chartCustomers}
-                onPress={() => navigation.navigate('CustomersList')}
+                onPress={guard(MP.customersView, () => navigation.navigate('CustomersList'))}
               />
             </View>
             <View style={styles.metricHalf}>
@@ -291,7 +316,7 @@ export const DashboardScreen: React.FC = () => {
                 icon={Wallet}
                 variant="pink"
                 subtitleColor={debtors !== '0' ? colors.warning : colors.textMuted}
-                onPress={() => navigation.navigate('CustomersList')}
+                onPress={guard(MP.customersView, () => navigation.navigate('CustomersList'))}
               />
             </View>
             <View style={styles.metricHalf}>
@@ -304,7 +329,7 @@ export const DashboardScreen: React.FC = () => {
                 icon={AlertTriangle}
                 variant="pink"
                 subtitleColor={colors.warning}
-                onPress={() => navigation.navigate('Sales', { screen: 'HoldOrders' })}
+                onPress={guard(MP.salesHold, () => navigation.navigate('Sales', { screen: 'HoldOrders' }))}
               />
             </View>
             <View style={styles.metricHalf}>
@@ -317,7 +342,7 @@ export const DashboardScreen: React.FC = () => {
                 icon={Wallet}
                 accentColor={colors.chartExpenses}
                 subtitleColor={colors.textMuted}
-                onPress={() => navigation.navigate('ExpensesList')}
+                onPress={guard(MP.expensesView, () => navigation.navigate('ExpensesList'))}
               />
             </View>
             <View style={styles.metricHalf}>
@@ -329,7 +354,7 @@ export const DashboardScreen: React.FC = () => {
                 subtitle="Today"
                 icon={Truck}
                 accentColor={colors.chartOrders}
-                onPress={() => navigation.navigate('TodayActivity', { tab: 'purchases' })}
+                onPress={guard(MP.homeTodayActivity, () => navigation.navigate('TodayActivity', { tab: 'purchases' }))}
               />
             </View>
             <View style={styles.metricFull}>
@@ -341,11 +366,22 @@ export const DashboardScreen: React.FC = () => {
                 subtitle="Running total this month"
                 icon={TrendingUp}
                 variant="dark"
-                onPress={() => navigation.navigate('TodayActivity', { tab: 'sales' })}
+                onPress={guard(MP.homeTodayActivity, () => navigation.navigate('TodayActivity', { tab: 'sales' }))}
               />
             </View>
           </View>
         </DashboardPanel>
+          </>
+        ) : (
+          <DashboardPanel>
+            <View style={styles.lockedFigures}>
+              <Lock size={18} color={colors.textMuted} />
+              <Text variant="bodyMedium" style={styles.mutedCenter}>
+                Business figures are locked for your account.
+              </Text>
+            </View>
+          </DashboardPanel>
+        )}
 
         <DashboardPanel>
           <SectionHeader title="Quick actions" subtitle="Shortcuts to daily tasks" />
@@ -358,18 +394,22 @@ export const DashboardScreen: React.FC = () => {
                 subtitle={action.subtitle}
                 icon={action.icon}
                 color={action.color}
-                onPress={() => handleQuickAction(action.id)}
+                locked={!can(QUICK_ACTION_PERMISSION[action.id])}
+                onPress={guard(QUICK_ACTION_PERMISSION[action.id], () =>
+                  handleQuickAction(action.id),
+                )}
               />
             ))}
           </View>
         </DashboardPanel>
 
+        {showFigures ? (
         <DashboardPanel style={styles.lastPanel}>
           <SectionHeader
             title="Today's tables"
             subtitle="Sales, purchases & reorder list"
             actionLabel="View all"
-            onActionPress={() => navigation.navigate('TodayActivity')}
+            onActionPress={guard(MP.homeTodayActivity, () => navigation.navigate('TodayActivity'))}
           />
 
           {loading && !recentTransactions.length ? (
@@ -399,12 +439,20 @@ export const DashboardScreen: React.FC = () => {
             </View>
           )}
         </DashboardPanel>
+        ) : null}
       </SmoothScrollView>
     </ScreenContainer>
   );
 };
 
 const styles = StyleSheet.create({
+  lockedFigures: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 6,
+  },
   scroll: {
     flex: 1,
     backgroundColor: colors.backgroundAlt,

@@ -23,6 +23,8 @@ import { formatCurrency, resolveCurrencyCode } from '@/utils/format';
 import type { HomeStackParamList } from '@/navigation/types';
 import type { CustomerSummary, SaleRecord } from '@/types/sales';
 import type { CustomerPaymentRecord } from '@/types/customers';
+import { MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 import { colors, TAB_BAR_SCROLL_PADDING } from '@/theme';
 
 type Nav = NativeStackNavigationProp<HomeStackParamList, 'CustomerHistory'>;
@@ -41,6 +43,7 @@ export const CustomerHistoryScreen: React.FC = () => {
   const { params } = useRoute<Route>();
   const { showErrorFromUnknown, showError, showConfirm } = useErrorDialog();
   const { settings } = usePosSettings();
+  const { can, showLocked } = useMobileAccess();
   const currency = resolveCurrencyCode(settings?.company?.currency);
 
   const [loading, setLoading] = useState(true);
@@ -152,6 +155,10 @@ export const CustomerHistoryScreen: React.FC = () => {
       if (payment.payment_method !== 'Cheque' || payment.is_returned) {
         return;
       }
+      if (!can(MP.customersChequeReturn)) {
+        showLocked();
+        return;
+      }
       showConfirm({
         title: 'Mark cheque as returned?',
         message: `${formatCurrency(payment.amount, currency)} will be added back to this customer's outstanding balance, and the bill it settled (if any) will be outstanding again. This can't be undone.`,
@@ -171,7 +178,7 @@ export const CustomerHistoryScreen: React.FC = () => {
         },
       });
     },
-    [currency, load, navigation, params.customerId, showConfirm, showErrorFromUnknown],
+    [can, currency, load, navigation, params.customerId, showConfirm, showErrorFromUnknown, showLocked],
   );
 
   /* ── Long-press a cheque-paid sale → mark that cheque as returned. The
@@ -180,6 +187,10 @@ export const CustomerHistoryScreen: React.FC = () => {
   const handleSaleLongPress = useCallback(
     (sale: SaleRecord) => {
       if (sale.payment_method !== 'Cheque' || sale.cheque_returned) {
+        return;
+      }
+      if (!can(MP.customersChequeReturn)) {
+        showLocked();
         return;
       }
       showConfirm({
@@ -201,7 +212,7 @@ export const CustomerHistoryScreen: React.FC = () => {
         },
       });
     },
-    [currency, load, navigation, params.customerId, showConfirm, showErrorFromUnknown],
+    [can, currency, load, navigation, params.customerId, showConfirm, showErrorFromUnknown, showLocked],
   );
 
   return (

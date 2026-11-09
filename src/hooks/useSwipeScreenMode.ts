@@ -1,6 +1,8 @@
 import { useCallback } from 'react';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import type { NavigationState, PartialState } from '@react-navigation/native';
+import { TAB_PERMISSION } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 const TAB_ROOT_ROUTES = new Set([
   'Dashboard',
@@ -45,8 +47,11 @@ export const useSwipeScreenMode = () => {
   };
 };
 
+const SWIPE_TAB_ORDER = ['Home', 'Sales', 'Products', 'Profile'] as const;
+
 export const useTabSwipeNavigation = () => {
   const navigation = useNavigation();
+  const { can } = useMobileAccess();
 
   const getTabNavigation = useCallback(() => {
     let parent = navigation.getParent();
@@ -84,19 +89,38 @@ export const useTabSwipeNavigation = () => {
     [getTabNavigation],
   );
 
+  const isTabOpen = useCallback(
+    (index: number) => {
+      const tab = SWIPE_TAB_ORDER[index];
+      const key = tab ? TAB_PERMISSION[tab] : null;
+      return key === null || can(key);
+    },
+    [can],
+  );
+
+  // Swipes skip over tabs the user's role has locked.
   const goNextTab = useCallback(() => {
     const index = getCurrentTabIndex();
-    if (index >= 0 && index < 3) {
-      goToTab(index + 1);
+    if (index < 0) {
+      return;
     }
-  }, [getCurrentTabIndex, goToTab]);
+    for (let i = index + 1; i < SWIPE_TAB_ORDER.length; i++) {
+      if (isTabOpen(i)) {
+        goToTab(i);
+        return;
+      }
+    }
+  }, [getCurrentTabIndex, goToTab, isTabOpen]);
 
   const goPrevTab = useCallback(() => {
     const index = getCurrentTabIndex();
-    if (index > 0) {
-      goToTab(index - 1);
+    for (let i = index - 1; i >= 0; i--) {
+      if (isTabOpen(i)) {
+        goToTab(i);
+        return;
+      }
     }
-  }, [getCurrentTabIndex, goToTab]);
+  }, [getCurrentTabIndex, goToTab, isTabOpen]);
 
   return { goNextTab, goPrevTab, getCurrentTabIndex };
 };

@@ -28,6 +28,8 @@ import { getApiBaseUrl } from '@/config/env';
 import { navigateToReports } from '@/navigation/navigationRef';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { colors, TAB_BAR_SCROLL_PADDING } from '@/theme';
+import { MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 const ProfileAvatar: React.FC<{ name?: string }> = ({ name }) => {
   const initial = (name?.trim()?.[0] ?? 'U').toUpperCase();
@@ -54,6 +56,7 @@ export const SettingsScreen: React.FC = () => {
   const { settings, loading: settingsLoading } = usePosSettings();
   const { showError, showConfirm } = useErrorDialog();
   const [printerSubtitle, setPrinterSubtitle] = useState('Receipt printer');
+  const { can, guard } = useMobileAccess();
 
   useFocusEffect(
     useCallback(() => {
@@ -146,7 +149,8 @@ export const SettingsScreen: React.FC = () => {
               iconBg={colors.pastelYellow}
               title="Company"
               subtitle={settings?.company?.name ?? 'Tap to view'}
-              onPress={() => navigation.navigate('CompanySettings')}
+              locked={!can(MP.settingsCompany)}
+              onPress={guard(MP.settingsCompany, () => navigation.navigate('CompanySettings'))}
             />
             <SettingsRow
               icon={Package}
@@ -160,7 +164,8 @@ export const SettingsScreen: React.FC = () => {
                   ? 'Multi-location on'
                   : 'Inventory rules'
               }
-              onPress={() => navigation.navigate('InventorySettings')}
+              locked={!can(MP.settingsInventory)}
+              onPress={guard(MP.settingsInventory, () => navigation.navigate('InventorySettings'))}
             />
             <SettingsRow
               icon={ShoppingBag}
@@ -168,7 +173,8 @@ export const SettingsScreen: React.FC = () => {
               iconBg={colors.pastelPink}
               title="Orders"
               subtitle="POS order preferences"
-              onPress={() => navigation.navigate('OrderSettings')}
+              locked={!can(MP.settingsOrders)}
+              onPress={guard(MP.settingsOrders, () => navigation.navigate('OrderSettings'))}
             />
             <SettingsRow
               icon={HardDrive}
@@ -176,7 +182,8 @@ export const SettingsScreen: React.FC = () => {
               iconBg={colors.primarySoft}
               title="Receipt printer"
               subtitle={printerSubtitle}
-              onPress={() => navigation.navigate('PrinterSetup')}
+              locked={!can(MP.settingsPrinter)}
+              onPress={guard(MP.settingsPrinter, () => navigation.navigate('PrinterSetup'))}
             />
             <SettingsRow
               icon={FileText}
@@ -184,7 +191,8 @@ export const SettingsScreen: React.FC = () => {
               iconBg={colors.pastelYellow}
               title="Receipt layout"
               subtitle="Logo upload, center, font, footer"
-              onPress={() => navigation.navigate('ReceiptCustomize')}
+              locked={!can(MP.settingsReceiptLayout)}
+              onPress={guard(MP.settingsReceiptLayout, () => navigation.navigate('ReceiptCustomize'))}
             />
             <SettingsRow
               icon={BarChart3}
@@ -192,7 +200,8 @@ export const SettingsScreen: React.FC = () => {
               iconBg={colors.pastelBlue}
               title="System reports"
               subtitle="Daily summary, sales, purchases, reorder"
-              onPress={() => navigateToReports()}
+              locked={!can(MP.reports)}
+              onPress={guard(MP.reports, () => navigateToReports())}
             />
             <SettingsRow
               icon={Bell}
@@ -200,7 +209,8 @@ export const SettingsScreen: React.FC = () => {
               iconBg={colors.accentSoft}
               title="Notifications"
               subtitle="Customer SMS & email"
-              onPress={() => navigation.navigate('NotificationsSettings')}
+              locked={!can(MP.settingsNotifications)}
+              onPress={guard(MP.settingsNotifications, () => navigation.navigate('NotificationsSettings'))}
             />
             <SettingsRow
               icon={AlertTriangle}
@@ -208,7 +218,8 @@ export const SettingsScreen: React.FC = () => {
               iconBg={colors.warningSoft}
               title="Alerts"
               subtitle="Expiry & cheque reminders"
-              onPress={() => navigation.navigate('AlertSettings')}
+              locked={!can(MP.settingsAlerts)}
+              onPress={guard(MP.settingsAlerts, () => navigation.navigate('AlertSettings'))}
             />
             <SettingsRow
               icon={Users}
@@ -216,9 +227,10 @@ export const SettingsScreen: React.FC = () => {
               iconBg={colors.primarySoft}
               title="Employees"
               subtitle="Staff & permissions"
-              onPress={() =>
-                showSettingsInfo('Employees', settings?.employee ?? {})
-              }
+              locked={!can(MP.settingsEmployees)}
+              onPress={guard(MP.settingsEmployees, () =>
+                showSettingsInfo('Employees', settings?.employee ?? {}),
+              )}
             />
           </VStack>
 
@@ -243,9 +255,10 @@ export const SettingsScreen: React.FC = () => {
               iconBg={colors.primarySoft}
               title="Server / API"
               subtitle={getApiBaseUrl() || 'Not configured'}
-              onPress={() =>
-                navigation.navigate('BackendConfig', { fromSettings: true })
-              }
+              locked={!can(MP.settingsServer)}
+              onPress={guard(MP.settingsServer, () =>
+                navigation.navigate('BackendConfig', { fromSettings: true }),
+              )}
             />
           </VStack>
 

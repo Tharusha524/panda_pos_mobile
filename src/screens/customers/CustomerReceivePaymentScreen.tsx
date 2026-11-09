@@ -44,6 +44,8 @@ import {
 import type { HomeStackParamList } from '@/navigation/types';
 import type { CustomerSummary } from '@/types/sales';
 import type { OutstandingBill } from '@/types/customers';
+import { LOCKED_STYLE, MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 type Nav = NativeStackNavigationProp<HomeStackParamList, 'CustomerReceivePayment'>;
 type Route = RouteProp<HomeStackParamList, 'CustomerReceivePayment'>;
@@ -60,6 +62,7 @@ const Label: React.FC<{ children: string }> = ({ children }) => (
 export const CustomerReceivePaymentScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
+  const { can, guard } = useMobileAccess();
   const insets = useSafeAreaInsets();
   const { currency, settings } = usePosSettings();
   const { showError, showErrorFromUnknown } = useErrorDialog();
@@ -293,8 +296,8 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
                   </VStack>
                 </HStack>
                 <TouchableOpacity
-                  style={styles.printBtn}
-                  onPress={handlePrintStatement}
+                  style={[styles.printBtn, !can(MP.customersStatement) && LOCKED_STYLE]}
+                  onPress={guard(MP.customersStatement, handlePrintStatement)}
                   disabled={printing}
                   accessibilityRole="button"
                   accessibilityLabel="Print customer details">

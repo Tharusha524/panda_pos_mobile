@@ -11,6 +11,8 @@ import { SettingsRow } from '@/components/settings/SettingsRow';
 import { getReportCategory, getReportMeta } from '@/types/reports';
 import type { ReportsStackParamList } from '@/navigation/types';
 import { colors, TAB_BAR_SCROLL_PADDING } from '@/theme';
+import { reportPermission } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 type Nav = NativeStackNavigationProp<ReportsStackParamList, 'ReportCategory'>;
 type Route = RouteProp<ReportsStackParamList, 'ReportCategory'>;
@@ -18,6 +20,7 @@ type Route = RouteProp<ReportsStackParamList, 'ReportCategory'>;
 export const ReportCategoryScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<Route>();
+  const { can, guard } = useMobileAccess();
   const category = getReportCategory(params.categoryId);
 
   if (!category) {
@@ -63,7 +66,10 @@ export const ReportCategoryScreen: React.FC = () => {
                   iconBg={colors.primarySoft}
                   title={meta.title}
                   subtitle={meta.subtitle}
-                  onPress={() => navigation.navigate('ReportView', { type: reportId })}
+                  locked={!can(reportPermission(reportId))}
+                  onPress={guard(reportPermission(reportId), () =>
+                    navigation.navigate('ReportView', { type: reportId }),
+                  )}
                 />
               );
             })}

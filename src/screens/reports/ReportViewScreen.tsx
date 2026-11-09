@@ -25,6 +25,8 @@ import { getReportMeta } from '@/types/reports';
 import type { ReportsStackParamList } from '@/navigation/types';
 import type { BackendReportData, SalesSummarySale } from '@/types/backendReports';
 import { colors } from '@/theme';
+import { MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 import {
   defaultReportFilters,
   formatReportDateRangeLabel,
@@ -92,6 +94,7 @@ const applyReturnsToSalesReportRow = (sale: SalesSummarySale): SalesSummarySale 
 export const ReportViewScreen: React.FC = () => {
   const { params } = useRoute<Route>();
   const navigation = useNavigation<NativeStackNavigationProp<ReportsStackParamList>>();
+  const { can, guard } = useMobileAccess();
   const insets = useSafeAreaInsets();
   const { settings, currency } = usePosSettings();
   const { showError, showConfirm } = useErrorDialog();
@@ -450,14 +453,16 @@ export const ReportViewScreen: React.FC = () => {
               <PrimaryButton
                 label={exportingExcel === 'download' ? 'Saving…' : 'Download Excel'}
                 variant="outline"
-                onPress={() => handleExportExcel('download')}
+                locked={!can(MP.reportsExport)}
+                onPress={guard(MP.reportsExport, () => handleExportExcel('download'))}
                 loading={exportingExcel === 'download'}
                 disabled={exportingExcel != null}
               />
               <PrimaryButton
                 label={exportingExcel === 'share' ? 'Sharing…' : 'Share Excel'}
                 variant="outline"
-                onPress={() => handleExportExcel('share')}
+                locked={!can(MP.reportsExport)}
+                onPress={guard(MP.reportsExport, () => handleExportExcel('share'))}
                 loading={exportingExcel === 'share'}
                 disabled={exportingExcel != null}
               />
@@ -490,7 +495,8 @@ export const ReportViewScreen: React.FC = () => {
             <Box w="100%" maxWidth={400} gap="$2" mt="$4" mb="$2">
               <PrimaryButton
                 label={printing ? 'Printing…' : 'Print via Bluetooth'}
-                onPress={handlePrint}
+                locked={!can(MP.reportsPrint)}
+                onPress={guard(MP.reportsPrint, handlePrint)}
                 loading={printing}
                 disabled={!result}
               />
@@ -499,14 +505,16 @@ export const ReportViewScreen: React.FC = () => {
                   <PrimaryButton
                     label={exportingExcel === 'download' ? 'Saving…' : 'Download Excel'}
                     variant="outline"
-                    onPress={() => handleExportExcel('download')}
+                    locked={!can(MP.reportsExport)}
+                onPress={guard(MP.reportsExport, () => handleExportExcel('download'))}
                     loading={exportingExcel === 'download'}
                     disabled={exportingExcel != null}
                   />
                   <PrimaryButton
                     label={exportingExcel === 'share' ? 'Sharing…' : 'Share Excel'}
                     variant="outline"
-                    onPress={() => handleExportExcel('share')}
+                    locked={!can(MP.reportsExport)}
+                onPress={guard(MP.reportsExport, () => handleExportExcel('share'))}
                     loading={exportingExcel === 'share'}
                     disabled={exportingExcel != null}
                   />

@@ -17,6 +17,8 @@ import {
 } from '@/utils/receiptImageShare';
 import { buildPrintHeaderFromSettings } from '@/utils/receiptPrintCustomization';
 import { TAB_BAR_SCROLL_PADDING } from '@/theme';
+import { MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 import type { HomeStackParamList } from '@/navigation/types';
 
 type Route = RouteProp<HomeStackParamList, 'ChequeReturnReceipt'>;
@@ -25,6 +27,7 @@ type Route = RouteProp<HomeStackParamList, 'ChequeReturnReceipt'>;
  * no Bluetooth thermal print support for this one. */
 export const ChequeReturnReceiptScreen: React.FC = () => {
   const navigation = useNavigation();
+  const { can, guard } = useMobileAccess();
   const { params } = useRoute<Route>();
   const { settings } = usePosSettings();
   const { showError } = useErrorDialog();
@@ -89,13 +92,15 @@ export const ChequeReturnReceiptScreen: React.FC = () => {
           <PrimaryButton
             label={savingImage ? 'Saving…' : 'Download receipt image'}
             variant="outline"
-            onPress={handleDownloadImage}
+            locked={!can(MP.salesShareReceipt)}
+            onPress={guard(MP.salesShareReceipt, handleDownloadImage)}
             loading={savingImage}
           />
           <PrimaryButton
             label="Share receipt image"
             variant="outline"
-            onPress={handleShareImage}
+            locked={!can(MP.salesShareReceipt)}
+            onPress={guard(MP.salesShareReceipt, handleShareImage)}
             disabled={savingImage}
           />
           <PrimaryButton label="Done" onPress={() => navigation.goBack()} />

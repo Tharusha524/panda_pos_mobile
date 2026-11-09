@@ -22,6 +22,8 @@ import {
 import { getReceiptPrintCustomization } from '@/utils/receiptPrintCustomization';
 import { customerService } from '@/services/api/customerService';
 import { TAB_BAR_SCROLL_PADDING } from '@/theme';
+import { MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 import type { HomeStackParamList } from '@/navigation/types';
 
 type Route = RouteProp<HomeStackParamList, 'CustomerSaleReceipt'>;
@@ -31,6 +33,7 @@ const isPrinterSetupError = (msg: string): boolean =>
 
 export const CustomerSaleReceiptScreen: React.FC = () => {
   const navigation = useNavigation();
+  const { can, guard } = useMobileAccess();
   const { params } = useRoute<Route>();
   const { settings, currency } = usePosSettings();
   const { showError, showConfirm } = useErrorDialog();
@@ -174,13 +177,15 @@ export const CustomerSaleReceiptScreen: React.FC = () => {
           <PrimaryButton
             label={savingImage ? 'Saving…' : 'Download receipt image'}
             variant="outline"
-            onPress={handleDownloadImage}
+            locked={!can(MP.salesShareReceipt)}
+            onPress={guard(MP.salesShareReceipt, handleDownloadImage)}
             loading={savingImage}
           />
           <PrimaryButton
             label="Share receipt image"
             variant="outline"
-            onPress={handleShareImage}
+            locked={!can(MP.salesShareReceipt)}
+            onPress={guard(MP.salesShareReceipt, handleShareImage)}
             disabled={savingImage}
           />
 

@@ -29,6 +29,8 @@ import { getReportMeta } from '@/types/reports';
 import type { SystemReportType } from '@/types/reports';
 import type { ReportsStackParamList } from '@/navigation/types';
 import { colors, TAB_BAR_SCROLL_PADDING } from '@/theme';
+import { MP, reportPermission } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 type Nav = NativeStackNavigationProp<ReportsStackParamList, 'ReportsList'>;
 
@@ -118,6 +120,10 @@ const defaultVisual = {
 
 export const ReportsListScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
+  const { can, guard, showLocked } = useMobileAccess();
+  const financeOpen =
+    can(reportPermission('finance_profit_loss')) ||
+    can(reportPermission('finance_transactions_summary'));
 
   return (
     <ScreenContainer>
@@ -154,7 +160,8 @@ export const ReportsListScreen: React.FC = () => {
                         iconBg={colors.pastelGreen}
                         title={item.title}
                         subtitle={item.subtitle}
-                        onPress={() => navigation.navigate('DayEndReport')}
+                        locked={!can(MP.reportsDayEnd)}
+                        onPress={guard(MP.reportsDayEnd, () => navigation.navigate('DayEndReport'))}
                       />
                     );
                   }
@@ -168,8 +175,11 @@ export const ReportsListScreen: React.FC = () => {
                         iconBg={visual.bg}
                         title={item.title}
                         subtitle={item.subtitle}
+                        locked={!financeOpen}
                         onPress={() =>
-                          navigation.navigate('ReportCategory', { categoryId: item.id })
+                          financeOpen
+                            ? navigation.navigate('ReportCategory', { categoryId: item.id })
+                            : showLocked()
                         }
                       />
                     );
@@ -188,7 +198,10 @@ export const ReportsListScreen: React.FC = () => {
                       iconBg={visual.bg}
                       title={meta.title}
                       subtitle={meta.subtitle}
-                      onPress={() => navigation.navigate('ReportView', { type: item.id })}
+                      locked={!can(reportPermission(item.id))}
+                      onPress={guard(reportPermission(item.id), () =>
+                        navigation.navigate('ReportView', { type: item.id }),
+                      )}
                     />
                   );
                 })}

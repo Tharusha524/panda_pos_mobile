@@ -28,6 +28,8 @@ import {
 } from '@/theme';
 import type { HomeStackParamList } from '@/navigation/types';
 import type { Expense } from '@/types/expenses';
+import { LOCKED_STYLE, MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 type Nav = NativeStackNavigationProp<HomeStackParamList, 'ExpensesList'>;
 
@@ -97,6 +99,7 @@ export const ExpensesScreen: React.FC = () => {
   const { showError } = useErrorDialog();
   const { currency } = usePosSettings();
   const expenses = useExpenses();
+  const { can, guard } = useMobileAccess();
 
   useEffect(() => {
     if (expenses.error) {
@@ -112,8 +115,8 @@ export const ExpensesScreen: React.FC = () => {
         showBack
         rightSlot={
           <TouchableOpacity
-            onPress={() => navigation.navigate('ExpenseForm', {})}
-            style={{ padding: 8 }}>
+            onPress={guard(MP.expensesCreate, () => navigation.navigate('ExpenseForm', {}))}
+            style={[{ padding: 8 }, !can(MP.expensesCreate) && LOCKED_STYLE]}>
             <Plus size={24} color={colors.primary} />
           </TouchableOpacity>
         }

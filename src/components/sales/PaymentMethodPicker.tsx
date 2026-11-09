@@ -3,6 +3,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Surface } from 'react-native-paper';
 import { colors, shadows } from '@/theme';
 import { getPaymentMethodMeta } from '@/utils/paymentMethodMeta';
+import { Lock } from 'lucide-react-native';
+import { LOCKED_STYLE } from '@/constants/mobilePermissions';
 
 interface PaymentMethodPickerProps {
   methods: string[];
@@ -11,6 +13,9 @@ interface PaymentMethodPickerProps {
   title?: string;
   /** When set, only this method is shown and cannot be changed. */
   lockedMethod?: string | null;
+  /** Methods the user's role may not use — greyed with a lock; tapping calls onLockedPress. */
+  isMethodLocked?: (method: string) => boolean;
+  onLockedPress?: () => void;
 }
 
 export const PaymentMethodPicker: React.FC<PaymentMethodPickerProps> = ({
@@ -19,6 +24,8 @@ export const PaymentMethodPicker: React.FC<PaymentMethodPickerProps> = ({
   onSelect,
   title = 'Payment method',
   lockedMethod = null,
+  isMethodLocked,
+  onLockedPress,
 }) => {
   const displayMethods = lockedMethod ? [lockedMethod] : methods;
 
@@ -30,12 +37,16 @@ export const PaymentMethodPicker: React.FC<PaymentMethodPickerProps> = ({
         const active = selected === method;
         const meta = getPaymentMethodMeta(method);
         const locked = Boolean(lockedMethod);
+        const noAccess = !locked && Boolean(isMethodLocked?.(method));
+        const TileIcon = noAccess ? Lock : meta.Icon;
 
         return (
           <Pressable
             key={method}
             onPress={() => {
-              if (!locked) {
+              if (noAccess) {
+                onLockedPress?.();
+              } else if (!locked) {
                 onSelect(method);
               }
             }}
@@ -49,12 +60,13 @@ export const PaymentMethodPicker: React.FC<PaymentMethodPickerProps> = ({
                     borderColor: meta.activeColor,
                   }
                 : styles.tileIdle,
+              noAccess && LOCKED_STYLE,
             ]}
             accessibilityRole="button"
-            accessibilityState={{ selected: active }}>
-            <meta.Icon
+            accessibilityState={{ selected: active, disabled: noAccess }}>
+            <TileIcon
               size={22}
-              color={active ? colors.textOnPrimary : meta.activeColor}
+              color={active ? colors.textOnPrimary : noAccess ? colors.textMuted : meta.activeColor}
               strokeWidth={2.2}
             />
             <Text

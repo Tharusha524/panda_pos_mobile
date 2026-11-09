@@ -38,6 +38,8 @@ import { colors, shadows, typography, TAB_BAR_SCROLL_PADDING } from '@/theme';
 import type { HomeStackParamList } from '@/navigation/types';
 import type { TodayActivityTab } from '@/navigation/types';
 import { TRANSACTION_TYPE_RETURN } from '@/types/sales';
+import { MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 type TodaySalesFilter = 'all' | 'sale' | 'return';
 
@@ -64,6 +66,7 @@ export const TodayActivityScreen: React.FC = () => {
   const { showError, showConfirm } = useErrorDialog();
   const { currency, settings } = usePosSettings();
   const { data, loading, refreshing, error, refresh } = useTodayActivity();
+  const { can, guard } = useMobileAccess();
   const [tab, setTab] = useState<TodayActivityTab>(route.params?.tab ?? 'sales');
   const [salesFilter, setSalesFilter] = useState<TodaySalesFilter>('all');
   const [printing, setPrinting] = useState(false);
@@ -276,7 +279,8 @@ export const TodayActivityScreen: React.FC = () => {
             <View style={styles.printWrap}>
               <PrimaryButton
                 label={printing ? 'Printing…' : printLabel}
-                onPress={handlePrintDaily}
+                locked={!can(MP.homePrintDaily)}
+                onPress={guard(MP.homePrintDaily, handlePrintDaily)}
                 loading={printing}
                 disabled={printing}
               />

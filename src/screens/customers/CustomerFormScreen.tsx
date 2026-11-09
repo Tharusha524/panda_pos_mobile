@@ -32,6 +32,8 @@ import { suggestNextCustomerCode } from '@/utils/customerCode';
 import { colors, typography, appInputStyle, appInputPlaceholderColor } from '@/theme';
 import type { HomeStackParamList, SalesStackParamList } from '@/navigation/types';
 import type { CustomerPayload } from '@/types/customers';
+import { LOCKED_STYLE, MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 type CustomerFormParams = HomeStackParamList['CustomerForm'];
 type Nav = NativeStackNavigationProp<
@@ -59,6 +61,12 @@ export const CustomerFormScreen: React.FC = () => {
   const customerId = route.params?.customerId != null ? Number(route.params.customerId) : undefined;
   const selectOnSave = route.params?.selectOnSave === true;
   const isEdit = customerId != null && !Number.isNaN(customerId);
+  const { can, guard } = useMobileAccess();
+  const saveKey = isEdit
+    ? MP.customersEdit
+    : selectOnSave
+      ? MP.salesCreateCustomer
+      : MP.customersCreate;
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -434,8 +442,8 @@ export const CustomerFormScreen: React.FC = () => {
 
               <Label>GPS location</Label>
               <TouchableOpacity
-                style={styles.locationBtn}
-                onPress={handleCaptureLocation}
+                style={[styles.locationBtn, !can(MP.customersLocation) && LOCKED_STYLE]}
+                onPress={guard(MP.customersLocation, handleCaptureLocation)}
                 disabled={submitting || capturingLocation}
                 accessibilityRole="button"
                 accessibilityLabel="Save current location">
@@ -483,14 +491,18 @@ export const CustomerFormScreen: React.FC = () => {
                           ? 'Update customer'
                           : 'Add customer'
                   }
-                  onPress={handleSave}
+                  locked={!can(saveKey)}
+                  onPress={guard(saveKey, handleSave)}
                   loading={submitting}
                   disabled={deleting}
                 />
                 {isEdit && customerId ? (
                   <PrimaryButton
                     label="Customer history"
-                    onPress={() => navigation.navigate('CustomerHistory', { customerId })}
+                    locked={!can(MP.customersHistory)}
+                    onPress={guard(MP.customersHistory, () =>
+                      navigation.navigate('CustomerHistory', { customerId }),
+                    )}
                     disabled={submitting || deleting}
                     variant="outline"
                   />
@@ -498,7 +510,8 @@ export const CustomerFormScreen: React.FC = () => {
                 {isEdit && !selectOnSave ? (
                   <PrimaryButton
                     label={deleting ? 'Deleting…' : 'Delete customer'}
-                    onPress={handleDelete}
+                    locked={!can(MP.customersDelete)}
+                    onPress={guard(MP.customersDelete, handleDelete)}
                     loading={deleting}
                     disabled={submitting}
                     variant="outline"

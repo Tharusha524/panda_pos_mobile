@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronRight, LucideProps } from 'lucide-react-native';
+import { ChevronRight, Lock, LucideProps } from 'lucide-react-native';
 import type { ComponentType } from 'react';
 import { HStack, Pressable, Text, VStack } from '@gluestack-ui/themed';
 import { colors, radius } from '@/theme';
@@ -13,6 +13,8 @@ interface SettingsRowProps {
   onPress?: () => void;
   showChevron?: boolean;
   destructive?: boolean;
+  /** Greyed with a lock — still pressable so the caller can show the locked message. */
+  locked?: boolean;
 }
 
 export const SettingsRow: React.FC<SettingsRowProps> = ({
@@ -24,10 +26,12 @@ export const SettingsRow: React.FC<SettingsRowProps> = ({
   onPress,
   showChevron = true,
   destructive = false,
+  locked = false,
 }) => (
   <Pressable
     onPress={onPress}
     disabled={!onPress}
+    opacity={locked ? 0.5 : 1}
     flexDirection="row"
     alignItems="center"
     py="$3.5"
@@ -59,7 +63,9 @@ export const SettingsRow: React.FC<SettingsRowProps> = ({
         ) : null}
       </VStack>
     </HStack>
-    {showChevron && onPress ? (
+    {locked ? (
+      <Lock size={18} color={colors.textMuted} />
+    ) : showChevron && onPress ? (
       <ChevronRight size={20} color={colors.textMuted} />
     ) : null}
   </Pressable>

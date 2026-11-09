@@ -17,8 +17,20 @@ import { AppHeader } from '@/components/common/AppHeader';
 import { SettingsRow } from '@/components/settings/SettingsRow';
 import type { ProductsStackParamList } from '@/navigation/types';
 import { colors, TAB_BAR_SCROLL_PADDING } from '@/theme';
+import { MP, type MobilePermissionKey } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 type Nav = NativeStackNavigationProp<ProductsStackParamList, 'InventoryActivity'>;
+
+const ACTION_PERMISSION: Record<string, MobilePermissionKey | null> = {
+  add: MP.productsAdd,
+  modify: MP.productsEdit,
+  batches: null,
+  adjust: MP.productsStockAdjust,
+  tog: MP.productsTog,
+  history: MP.productsHistory,
+  location: MP.productsAddLocation,
+};
 
 const ACTIONS = [
   {
@@ -81,6 +93,11 @@ const ACTIONS = [
 
 export const InventoryActivityScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
+  const { can, showLocked } = useMobileAccess();
+  const isLocked = (id: string) => {
+    const key = ACTION_PERMISSION[id];
+    return key != null && !can(key);
+  };
 
   return (
     <ScreenContainer>
@@ -113,7 +130,12 @@ export const InventoryActivityScreen: React.FC = () => {
                 iconBg={action.bg}
                 title={action.title}
                 subtitle={action.subtitle}
+                locked={isLocked(action.id)}
                 onPress={() => {
+                  if (isLocked(action.id)) {
+                    showLocked();
+                    return;
+                  }
                   switch (action.id) {
                     case 'add':
                       navigation.navigate('ItemForm', {});

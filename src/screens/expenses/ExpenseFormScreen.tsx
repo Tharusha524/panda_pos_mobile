@@ -28,6 +28,8 @@ import {
 } from '@/theme';
 import type { HomeStackParamList } from '@/navigation/types';
 import type { ExpensePayload } from '@/types/expenses';
+import { MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 type Nav = NativeStackNavigationProp<HomeStackParamList, 'ExpenseForm'>;
 type Route = RouteProp<HomeStackParamList, 'ExpenseForm'>;
@@ -44,6 +46,8 @@ export const ExpenseFormScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { showError, showErrorFromUnknown, showConfirm } = useErrorDialog();
   const expenseId = route.params?.expenseId;
+  const { can, guard } = useMobileAccess();
+  const saveKey = expenseId ? MP.expensesEdit : MP.expensesCreate;
 
   const [loading, setLoading] = useState(!!expenseId);
   const [submitting, setSubmitting] = useState(false);
@@ -282,14 +286,16 @@ export const ExpenseFormScreen: React.FC = () => {
               <VStack mt="$5" space="sm">
                 <PrimaryButton
                   label={expenseId ? 'Update expense' : 'Save expense'}
-                  onPress={handleSave}
+                  locked={!can(saveKey)}
+                  onPress={guard(saveKey, handleSave)}
                   loading={submitting}
                 />
                 {expenseId ? (
                   <PrimaryButton
                     label="Delete expense"
                     variant="outline"
-                    onPress={handleDelete}
+                    locked={!can(MP.expensesDelete)}
+                    onPress={guard(MP.expensesDelete, handleDelete)}
                     disabled={submitting}
                   />
                 ) : null}

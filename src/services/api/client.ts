@@ -8,6 +8,8 @@ export const apiClient = axios.create({
   headers: {
     Accept: 'application/json',
     'Content-Type': 'application/json',
+    // Lets the server apply this user's mobile-app permissions (website is unaffected).
+    'X-Client-App': 'pos-mobile',
   },
 });
 

@@ -25,6 +25,8 @@ import type { HomeStackParamList } from '@/navigation/types';
 import { formatCurrency, formatNumber } from '@/utils/format';
 import { colors, shadows, appInputStyle, appInputPlaceholderColor } from '@/theme';
 import type { CustomerSummary } from '@/types/sales';
+import { LOCKED_STYLE, MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 export const CustomersScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<HomeStackParamList, 'CustomersList'>>();
@@ -32,6 +34,7 @@ export const CustomersScreen: React.FC = () => {
   const { showError, showErrorFromUnknown, showConfirm } = useErrorDialog();
   const notifyRefresh = useDataRefreshNotify();
   const { currency } = usePosSettings();
+  const { can, guard } = useMobileAccess();
   const {
     loading,
     refreshing,
@@ -148,12 +151,16 @@ export const CustomersScreen: React.FC = () => {
         <HStack gap="$2" mt="$3" justifyContent="flex-end">
           {(item.net_balance ?? 0) > 0 ? (
             <TouchableOpacity
-              style={[styles.actionBtn, styles.receiveBtn]}
-              onPress={() =>
+              style={[
+                styles.actionBtn,
+                styles.receiveBtn,
+                !can(MP.customersReceivePayment) && LOCKED_STYLE,
+              ]}
+              onPress={guard(MP.customersReceivePayment, () =>
                 navigation.navigate('CustomerReceivePayment', {
                   customerId: item.id,
-                })
-              }
+                }),
+              )}
               accessibilityRole="button"
               accessibilityLabel={`Receive payment from ${item.customer_name}`}>
               <Wallet size={16} color={colors.success} />
@@ -164,8 +171,8 @@ export const CustomersScreen: React.FC = () => {
           ) : null}
           {item.latitude != null && item.longitude != null ? (
             <TouchableOpacity
-              style={styles.actionBtn}
-              onPress={() => handleDirections(item)}
+              style={[styles.actionBtn, !can(MP.customersLocation) && LOCKED_STYLE]}
+              onPress={guard(MP.customersLocation, () => handleDirections(item))}
               accessibilityRole="button"
               accessibilityLabel={`Get directions to ${item.customer_name}`}>
               <Navigation size={16} color={colors.primary} />
@@ -175,8 +182,8 @@ export const CustomersScreen: React.FC = () => {
             </TouchableOpacity>
           ) : null}
           <TouchableOpacity
-            style={styles.actionBtn}
-            onPress={() => handleEdit(item)}
+            style={[styles.actionBtn, !can(MP.customersEdit) && LOCKED_STYLE]}
+            onPress={guard(MP.customersEdit, () => handleEdit(item))}
             accessibilityRole="button"
             accessibilityLabel={`Edit ${item.customer_name}`}>
             <Pencil size={16} color={colors.primary} />
@@ -197,8 +204,8 @@ export const CustomersScreen: React.FC = () => {
         showBack
         rightSlot={
           <TouchableOpacity
-            onPress={() => navigation.navigate('CustomerForm', {})}
-            style={{ padding: 8 }}>
+            onPress={guard(MP.customersCreate, () => navigation.navigate('CustomerForm', {}))}
+            style={[{ padding: 8 }, !can(MP.customersCreate) && LOCKED_STYLE]}>
             <Plus size={24} color={colors.primary} />
           </TouchableOpacity>
         }
@@ -284,13 +291,16 @@ export const CustomersScreen: React.FC = () => {
               </Text>
               {!search.trim() && !filterByBalance ? (
                 <TouchableOpacity
-                  onPress={() => navigation.navigate('CustomerForm', {})}
-                  style={{
-                    paddingHorizontal: 20,
-                    paddingVertical: 12,
-                    borderRadius: 12,
-                    backgroundColor: colors.primary,
-                  }}>
+                  onPress={guard(MP.customersCreate, () => navigation.navigate('CustomerForm', {}))}
+                  style={[
+                    {
+                      paddingHorizontal: 20,
+                      paddingVertical: 12,
+                      borderRadius: 12,
+                      backgroundColor: colors.primary,
+                    },
+                    !can(MP.customersCreate) && LOCKED_STYLE,
+                  ]}>
                   <Text color={colors.white} fontWeight="$bold">
                     Add customer
                   </Text>

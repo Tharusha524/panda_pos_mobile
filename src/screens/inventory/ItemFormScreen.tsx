@@ -42,6 +42,8 @@ import {
 } from '@/utils/inventoryCategoryUtils';
 import { Camera, Layers, Trash2 } from 'lucide-react-native';
 import { typography, colors, appInputStyle, appInputPlaceholderColor } from '@/theme';
+import { MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 const UOM_PRESETS = ['Pcs', 'Kg', 'Ltr', 'Box', 'Pkt', 'Doz'];
 
@@ -78,6 +80,8 @@ export const ItemFormScreen: React.FC = () => {
   const { showErrorFromUnknown, showConfirm } = useErrorDialog();
   const notifyRefresh = useDataRefreshNotify();
   const itemId = route.params?.itemId != null ? Number(route.params.itemId) : undefined;
+  const { can, guard } = useMobileAccess();
+  const saveKey = itemId != null ? MP.productsEdit : MP.productsAdd;
   const isEdit = itemId != null && !Number.isNaN(itemId);
 
   const scrollRef = useRef<ScrollView>(null);
@@ -432,7 +436,7 @@ export const ItemFormScreen: React.FC = () => {
             </Text>
             <Box flexDirection="row" alignItems="center" gap="$3">
               <Pressable
-                onPress={handlePickPhoto}
+                onPress={guard(saveKey, handlePickPhoto)}
                 disabled={submitting}
                 style={photoStyles.photoBox}
                 accessibilityRole="button"
@@ -454,7 +458,7 @@ export const ItemFormScreen: React.FC = () => {
               </Pressable>
               <VStack gap="$2" flex={1}>
                 <Pressable
-                  onPress={handlePickPhoto}
+                  onPress={guard(saveKey, handlePickPhoto)}
                   disabled={submitting}
                   style={photoStyles.photoBtn}>
                   <Camera size={14} color={colors.text} />
@@ -464,7 +468,7 @@ export const ItemFormScreen: React.FC = () => {
                 </Pressable>
                 {photoUri ? (
                   <Pressable
-                    onPress={handleRemovePhoto}
+                    onPress={guard(saveKey, handleRemovePhoto)}
                     disabled={submitting}
                     style={[photoStyles.photoBtn, photoStyles.photoBtnDanger]}>
                     <Trash2 size={14} color={colors.error} />
@@ -610,7 +614,8 @@ export const ItemFormScreen: React.FC = () => {
               ) : null}
               <PrimaryButton
                 label={submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Add item'}
-                onPress={handleSave}
+                locked={!can(saveKey)}
+                onPress={guard(saveKey, handleSave)}
                 loading={submitting}
               />
             </Box>

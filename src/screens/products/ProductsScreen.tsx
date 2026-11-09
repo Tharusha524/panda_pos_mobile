@@ -17,6 +17,8 @@ import { formatCurrency } from '@/utils/format';
 import { colors, appInputStyle, appInputPlaceholderColor, TAB_BAR_SCROLL_PADDING, shadows } from '@/theme';
 import type { ProductsStackParamList } from '@/navigation/types';
 import type { InventoryItem } from '@/types/sales';
+import { MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 type Nav = NativeStackNavigationProp<ProductsStackParamList, 'ProductsList'>;
 
@@ -25,6 +27,7 @@ export const ProductsScreen: React.FC = () => {
   const { showError } = useErrorDialog();
   const { currency } = usePosSettings();
   const inv = useInventory();
+  const { can, guard } = useMobileAccess();
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
 
   const locationOptions: SelectionOption[] = useMemo(
@@ -148,7 +151,8 @@ export const ProductsScreen: React.FC = () => {
               <SlidersHorizontal size={22} color={colors.text} />
             </Pressable>
             <Pressable
-              onPress={() => navigation.navigate('PurchasesList')}
+              onPress={guard(MP.purchasesView, () => navigation.navigate('PurchasesList'))}
+              opacity={can(MP.purchasesView) ? 1 : 0.4}
               p="$2"
               accessibilityLabel="Purchases">
               <Truck size={22} color={colors.text} />

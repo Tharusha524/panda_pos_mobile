@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Card, Text } from 'react-native-paper';
-import { LucideProps } from 'lucide-react-native';
+import { Lock, LucideProps } from 'lucide-react-native';
 import type { ComponentType } from 'react';
 import { cardStyles, colors, radius, typography } from '@/theme';
 
@@ -12,6 +12,8 @@ interface QuickActionCardProps {
   color?: string;
   onPress?: () => void;
   wide?: boolean;
+  /** Greyed with a lock — still pressable so the caller can show the locked message. */
+  locked?: boolean;
 }
 
 export const QuickActionCard: React.FC<QuickActionCardProps> = ({
@@ -21,14 +23,25 @@ export const QuickActionCard: React.FC<QuickActionCardProps> = ({
   color = colors.backgroundAlt,
   onPress,
   wide = false,
+  locked = false,
 }) => (
   <Card
     mode="outlined"
-    style={[wide ? styles.wide : styles.narrow, cardStyles.surfaceFlat, styles.card]}
+    style={[
+      wide ? styles.wide : styles.narrow,
+      cardStyles.surfaceFlat,
+      styles.card,
+      locked && styles.locked,
+    ]}
     onPress={onPress}>
     <Card.Content style={styles.content}>
       <View style={[styles.iconWrap, { backgroundColor: color }]}>
         <Icon size={22} color={colors.text} strokeWidth={2.35} />
+        {locked ? (
+          <View style={styles.lockBadge}>
+            <Lock size={10} color={colors.white} strokeWidth={3} />
+          </View>
+        ) : null}
       </View>
       <View style={styles.textCol}>
         <Text style={styles.label} numberOfLines={1}>
@@ -48,6 +61,20 @@ const styles = StyleSheet.create({
   card: {
     marginBottom: 0,
     borderColor: colors.border,
+  },
+  locked: {
+    opacity: 0.5,
+  },
+  lockBadge: {
+    position: 'absolute',
+    right: -4,
+    bottom: -4,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.textSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   wide: {
     width: '48%',

@@ -5,6 +5,8 @@ export interface User {
   email_verified_at?: string | null;
   created_at?: string;
   updated_at?: string;
+  /** Per-feature mobile access from the user's role (see constants/mobilePermissions). */
+  mobile_access?: Record<string, boolean>;
 }
 
 export interface LoginCredentials {

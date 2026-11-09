@@ -59,6 +59,8 @@ import {
   shadows,
 } from '@/theme';
 import type { SalesStackParamList } from '@/navigation/types';
+import { LOCKED_STYLE, MP, paymentMethodPermission } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 type Nav = NativeStackNavigationProp<SalesStackParamList, 'SaleOrder'>;
 
@@ -102,6 +104,8 @@ export const SaleOrderScreen: React.FC = () => {
   const { currency, settings } = usePosSettings();
   const pos = usePosSaleContext();
   const { error: posError, setError: setPosError } = pos;
+  const { can, guard, showLocked } = useMobileAccess();
+  const canDiscount = can(MP.salesDiscount);
 
   const [customerModal, setCustomerModal] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState(pos.paymentMethod);
@@ -224,6 +228,13 @@ export const SaleOrderScreen: React.FC = () => {
   // Plain-sale checkout only — a return/exchange/credit-account refund
   // always settles through one path, no method-splitting there.
   const canSplitPayment = !pos.isReturn && !pos.isExchange && !pos.returnFromCreditSale;
+  // Payment-method permissions apply to plain sales only (same as the server) —
+  // a return/exchange refund isn't the user choosing to give credit.
+  const isMethodLocked = (method: string) => {
+    const key = canSplitPayment ? paymentMethodPermission(method) : null;
+    return key !== null && !can(key);
+  };
+  const allowedSplitMethods = pos.paymentMethods.filter(m => !isMethodLocked(m));
 
   const buildCheckoutCart = useCallback((): CartLine[] => {
     return pos.cart.map(line => {
@@ -546,6 +557,15 @@ export const SaleOrderScreen: React.FC = () => {
   };
 
   const handlePay = async () => {
+    if (canSplitPayment) {
+      const methodsUsed = splitPayment
+        ? splitRows.map(r => r.paymentMethod)
+        : [paymentMethod];
+      if ((splitPayment && !can(MP.salesSplit)) || methodsUsed.some(isMethodLocked)) {
+        showLocked();
+        return;
+      }
+    }
     applyDiscountDraft();
     const checkoutCart = buildCheckoutCart();
     commitAllQtyDrafts();
@@ -845,6 +865,10 @@ export const SaleOrderScreen: React.FC = () => {
     if (pos.isReturn || pos.activeHoldId) {
       return;
     }
+    if (!can(MP.salesHold)) {
+      showLocked();
+      return;
+    }
     applyDiscountDraft();
     const checkoutCart = buildCheckoutCart();
     commitAllQtyDrafts();
@@ -1054,8 +1078,8 @@ export const SaleOrderScreen: React.FC = () => {
                   currency={currency}
                   qtyDraft={qtyDrafts[lineKey] ?? String(line.qty)}
                   priceDraft={priceDrafts[lineKey] ?? String(line.unit_price)}
-                  allowEditPrice
-                  allowEditReturnPrice={pos.isExchange}
+                  allowEditPrice={canDiscount}
+                  allowEditReturnPrice={pos.isExchange && canDiscount}
                   lineTotal={lineTotalPreview}
                   offerDiscount={offerLineDiscount}
                   isReturn={lineIsReturn}
@@ -1163,7 +1187,13 @@ export const SaleOrderScreen: React.FC = () => {
             </>
           ) : null}
 
-          {!pos.isReturn && pos.allowOrderDiscount ? (
+          {!pos.isReturn && pos.allowOrderDiscount && !canDiscount ? (
+            <Pressable onPress={showLocked} style={LOCKED_STYLE}>
+              <Text style={styles.sectionTitle}>Manual discount (locked)</Text>
+            </Pressable>
+          ) : null}
+
+          {!pos.isReturn && pos.allowOrderDiscount && canDiscount ? (
             <>
               <Text style={styles.sectionTitle}>Manual discount</Text>
               <FilterChips
@@ -1327,7 +1357,8 @@ export const SaleOrderScreen: React.FC = () => {
 
           {canSplitPayment ? (
             <Pressable
-              onPress={() => setSplitPayment(v => !v)}
+              onPress={guard(MP.salesSplit, () => setSplitPayment(v => !v))}
+              opacity={can(MP.salesSplit) ? 1 : LOCKED_STYLE.opacity}
               flexDirection="row"
               alignItems="center"
               justifyContent="space-between"
@@ -1352,7 +1383,7 @@ export const SaleOrderScreen: React.FC = () => {
 
           {splitPayment && canSplitPayment ? (
             <SplitPaymentEditor
-              methods={pos.paymentMethods}
+              methods={allowedSplitMethods}
               rows={splitRows}
               onChange={setSplitRows}
               total={previewOrderTotal}
@@ -1369,6 +1400,8 @@ export const SaleOrderScreen: React.FC = () => {
                     : null
                 }
                 title={pos.returnFromCreditSale ? 'Refund to account' : 'Payment method'}
+                isMethodLocked={isMethodLocked}
+                onLockedPress={showLocked}
                 onSelect={method => {
                   setPaymentMethod(method);
                   pos.setPaymentMethod(method);
@@ -1431,7 +1464,9 @@ export const SaleOrderScreen: React.FC = () => {
         footerActionLabel="+ New customer"
         onFooterAction={() => {
           setCustomerModal(false);
-          navigation.navigate('CustomerForm', { selectOnSave: true });
+          guard(MP.salesCreateCustomer, () =>
+            navigation.navigate('CustomerForm', { selectOnSave: true }),
+          )();
         }}
         headerExtra={
           pos.route ? (

@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet } from 'react-native';
-import { Pressable, Text, ActivityIndicator } from 'react-native';
+import { Pressable, Text, ActivityIndicator, View } from 'react-native';
+import { Lock } from 'lucide-react-native';
 import { colors, shadows, typography } from '@/theme';
 
 interface PrimaryButtonProps {
@@ -11,7 +12,24 @@ interface PrimaryButtonProps {
   variant?: 'primary' | 'outline' | 'outlineLight' | 'ghost' | 'light';
   /** Smaller button for dialogs/modals (no bottom margin). */
   compact?: boolean;
+  /** Greyed with a lock icon — still pressable so the caller can show the locked message. */
+  locked?: boolean;
 }
+
+const LabelText: React.FC<{ label: string; style: object; locked: boolean; color: string }> = ({
+  label,
+  style,
+  locked,
+  color,
+}) =>
+  locked ? (
+    <View style={styles.lockedRow}>
+      <Lock size={15} color={color} strokeWidth={2.6} />
+      <Text style={style}>{label}</Text>
+    </View>
+  ) : (
+    <Text style={style}>{label}</Text>
+  );
 
 export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
   label,
@@ -20,6 +38,7 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
   disabled = false,
   variant = 'primary',
   compact = false,
+  locked = false,
 }) => {
   const isDisabled = disabled || loading;
 
@@ -33,11 +52,12 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
           compact && styles.compact,
           styles.outline,
           isDisabled && styles.disabled,
+          locked && styles.locked,
         ]}>
         {loading ? (
           <ActivityIndicator color={colors.primary} />
         ) : (
-          <Text style={styles.outlineText}>{label}</Text>
+          <LabelText label={label} style={styles.outlineText} locked={locked} color={colors.primary} />
         )}
       </Pressable>
     );
@@ -53,11 +73,12 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
           compact && styles.compact,
           styles.outlineLight,
           isDisabled && styles.disabled,
+          locked && styles.locked,
         ]}>
         {loading ? (
           <ActivityIndicator color={colors.textOnDark} />
         ) : (
-          <Text style={styles.outlineLightText}>{label}</Text>
+          <LabelText label={label} style={styles.outlineLightText} locked={locked} color={colors.textOnDark} />
         )}
       </Pressable>
     );
@@ -65,8 +86,8 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
 
   if (variant === 'ghost') {
     return (
-      <Pressable onPress={onPress} disabled={isDisabled} style={styles.ghost}>
-        <Text style={styles.ghostText}>{label}</Text>
+      <Pressable onPress={onPress} disabled={isDisabled} style={[styles.ghost, locked && styles.locked]}>
+        <LabelText label={label} style={styles.ghostText} locked={locked} color={colors.textMuted} />
       </Pressable>
     );
   }
@@ -76,11 +97,11 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
       <Pressable
         onPress={onPress}
         disabled={isDisabled}
-        style={[styles.base, compact && styles.compact, styles.light, shadows.md, isDisabled && styles.disabled]}>
+        style={[styles.base, compact && styles.compact, styles.light, shadows.md, isDisabled && styles.disabled, locked && styles.locked]}>
         {loading ? (
           <ActivityIndicator color={colors.primary} />
         ) : (
-          <Text style={styles.lightText}>{label}</Text>
+          <LabelText label={label} style={styles.lightText} locked={locked} color={colors.primary} />
         )}
       </Pressable>
     );
@@ -96,11 +117,12 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
         styles.primary,
         shadows.md,
         isDisabled && styles.disabled,
+          locked && styles.locked,
       ]}>
       {loading ? (
         <ActivityIndicator color={colors.textOnPrimary} />
       ) : (
-        <Text style={styles.primaryText}>{label}</Text>
+        <LabelText label={label} style={styles.primaryText} locked={locked} color={colors.textOnPrimary} />
       )}
     </Pressable>
   );
@@ -166,5 +188,13 @@ const styles = StyleSheet.create({
   disabled: {
     opacity: 0.55,
     backgroundColor: colors.textMuted,
+  },
+  locked: {
+    opacity: 0.45,
+  },
+  lockedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
 });

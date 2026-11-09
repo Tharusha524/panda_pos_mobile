@@ -21,6 +21,8 @@ import {
 } from '@/utils/receiptImageShare';
 import { getReceiptPrintCustomization } from '@/utils/receiptPrintCustomization';
 import { colors } from '@/theme';
+import { MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 import type { ProductsStackParamList } from '@/navigation/types';
 
 type Route = RouteProp<ProductsStackParamList, 'PurchaseReceipt'>;
@@ -31,6 +33,7 @@ const isPrinterSetupError = (msg: string): boolean =>
 
 export const PurchaseReceiptScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
+  const { can, guard } = useMobileAccess();
   const { params } = useRoute<Route>();
   const { settings, currency } = usePosSettings();
   const { showError, showConfirm } = useErrorDialog();
@@ -180,19 +183,22 @@ export const PurchaseReceiptScreen: React.FC = () => {
               <PrimaryButton
                 label={savingImage ? 'Saving…' : 'Download receipt image'}
                 variant="outline"
-                onPress={handleDownloadImage}
+                locked={!can(MP.purchasesPrint)}
+                onPress={guard(MP.purchasesPrint, handleDownloadImage)}
                 loading={savingImage}
               />
               <PrimaryButton
                 label="Share receipt image"
                 variant="outline"
-                onPress={handleShareImage}
+                locked={!can(MP.purchasesPrint)}
+                onPress={guard(MP.purchasesPrint, handleShareImage)}
                 disabled={savingImage}
               />
               {bluetoothPrintService.isSupported() ? (
                 <PrimaryButton
                   label={printing ? 'Printing…' : 'Print bill via Bluetooth'}
-                  onPress={handlePrint}
+                  locked={!can(MP.purchasesPrint)}
+                  onPress={guard(MP.purchasesPrint, handlePrint)}
                   loading={printing}
                 />
               ) : null}

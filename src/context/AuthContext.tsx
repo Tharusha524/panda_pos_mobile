@@ -4,8 +4,10 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
+import { AppState } from 'react-native';
 import { authService } from '@/services/api/authService';
 import { tokenStorage } from '@/services/storage/tokenStorage';
 import type { LoginCredentials, User } from '@/types/auth';
@@ -57,6 +59,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => {
     bootstrap();
   }, [bootstrap]);
+
+  // Re-read the profile when the app returns to the foreground so permission
+  // changes made on the website apply without signing out. Errors are ignored
+  // — a weak network must never log the user out.
+  const lastForegroundRefresh = useRef(0);
+  const isSignedIn = !!user;
+  useEffect(() => {
+    if (!isSignedIn) {
+      return;
+    }
+    const subscription = AppState.addEventListener('change', async state => {
+      if (state !== 'active' || Date.now() - lastForegroundRefresh.current < 30000) {
+        return;
+      }
+      lastForegroundRefresh.current = Date.now();
+      try {
+        const freshUser = await authService.fetchUser();
+        if (await tokenStorage.getToken()) {
+          setUser(freshUser);
+          await tokenStorage.setUser(freshUser);
+        }
+      } catch {
+        // keep the current session
+      }
+    });
+    return () => subscription.remove();
+  }, [isSignedIn]);
 
   const login = useCallback(async (credentials: LoginCredentials) => {
     const { token, user: loggedInUser } = await authService.login(credentials);

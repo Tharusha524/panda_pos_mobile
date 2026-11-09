@@ -6,9 +6,15 @@ import { SaleOrderScreen } from '@/screens/sales/SaleOrderScreen';
 import { SaleReceiptScreen } from '@/screens/sales/SaleReceiptScreen';
 import { HoldOrdersScreen } from '@/screens/sales/HoldOrdersScreen';
 import { CustomerFormScreen } from '@/screens/customers/CustomerFormScreen';
+import { withMobileAccess } from '@/components/common/LockedScreen';
+import { MP } from '@/constants/mobilePermissions';
 import type { SalesStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<SalesStackParamList>();
+
+const GuardedHoldOrders = withMobileAccess(HoldOrdersScreen, () => MP.salesHold);
+// In the Sales tab this form only ever creates a new customer for the sale.
+const GuardedCustomerForm = withMobileAccess(CustomerFormScreen, () => MP.salesCreateCustomer);
 
 export const SalesStackNavigator: React.FC = () => (
   <PosSaleProvider>
@@ -22,8 +28,8 @@ export const SalesStackNavigator: React.FC = () => (
       <Stack.Screen name="SalesPOS" component={SalesScreen} />
       <Stack.Screen name="SaleOrder" component={SaleOrderScreen} />
       <Stack.Screen name="SaleReceipt" component={SaleReceiptScreen} />
-      <Stack.Screen name="HoldOrders" component={HoldOrdersScreen} />
-      <Stack.Screen name="CustomerForm" component={CustomerFormScreen} />
+      <Stack.Screen name="HoldOrders" component={GuardedHoldOrders} />
+      <Stack.Screen name="CustomerForm" component={GuardedCustomerForm} />
     </Stack.Navigator>
   </PosSaleProvider>
 );

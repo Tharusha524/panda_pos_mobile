@@ -38,6 +38,8 @@ import {
   appInputPlaceholderColor,
   shadows,
 } from '@/theme';
+import { LOCKED_STYLE, MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 type Nav = NativeStackNavigationProp<ProductsStackParamList, 'ItemBatches'>;
 type Route = RouteProp<ProductsStackParamList, 'ItemBatches'>;
@@ -53,6 +55,7 @@ const formatQty = (qty: number, uom?: string) => `${qty}${uom ? ` ${uom}` : ''}`
 export const ItemBatchesScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<Route>();
+  const { can, guard } = useMobileAccess();
   const insets = useSafeAreaInsets();
   const { currency } = usePosSettings();
   const { showErrorFromUnknown, showConfirm } = useErrorDialog();
@@ -282,14 +285,14 @@ export const ItemBatchesScreen: React.FC = () => {
                   </Text>
                   <View style={styles.rowActions}>
                     <TouchableOpacity
-                      style={styles.iconBtn}
-                      onPress={() => openEditModal(batch)}
+                      style={[styles.iconBtn, !can(MP.productsBatches) && LOCKED_STYLE]}
+                      onPress={guard(MP.productsBatches, () => openEditModal(batch))}
                       hitSlop={8}>
                       <Pencil size={16} color={colors.primary} />
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={styles.iconBtn}
-                      onPress={() => handleDeleteBatch(batch)}
+                      style={[styles.iconBtn, !can(MP.productsBatchDelete) && LOCKED_STYLE]}
+                      onPress={guard(MP.productsBatchDelete, () => handleDeleteBatch(batch))}
                       hitSlop={8}>
                       <Trash2 size={16} color={colors.error} />
                     </TouchableOpacity>
@@ -300,7 +303,8 @@ export const ItemBatchesScreen: React.FC = () => {
 
             <PrimaryButton
               label="Add batch"
-              onPress={openCreateModal}
+              locked={!can(MP.productsBatches)}
+              onPress={guard(MP.productsBatches, openCreateModal)}
               disabled={submitting}
             />
           </VStack>

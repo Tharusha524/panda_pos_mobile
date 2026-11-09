@@ -14,6 +14,8 @@ import { usePosSettings } from '@/context/PosSettingsContext';
 import { formatCurrency } from '@/utils/format';
 import { colors, appInputStyle, shadows, typography } from '@/theme';
 import type { SaleRecord } from '@/types/sales';
+import { LOCKED_STYLE, MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 interface ReturnSalePickerProps {
   /** Hide the "Return without bill" option — used in Exchange mode, where a source bill is required. Defaults to true (unchanged Return-mode behavior). */
@@ -25,6 +27,7 @@ export const ReturnSalePicker: React.FC<ReturnSalePickerProps> = ({
 }) => {
   const pos = usePosSaleContext();
   const { currency } = usePosSettings();
+  const { can, guard } = useMobileAccess();
   const [billQuery, setBillQuery] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [saleBills, setSaleBills] = useState<SaleRecord[]>([]);
@@ -168,8 +171,8 @@ export const ReturnSalePicker: React.FC<ReturnSalePickerProps> = ({
 
       {allowWithoutBill ? (
         <TouchableOpacity
-          style={styles.walkInBtn}
-          onPress={pos.startReturnWithoutBill}
+          style={[styles.walkInBtn, !can(MP.salesReturnWithoutBill) && LOCKED_STYLE]}
+          onPress={guard(MP.salesReturnWithoutBill, pos.startReturnWithoutBill)}
           disabled={pos.loadingReturnSale}>
           <Text style={styles.walkInBtnText}>Return without bill</Text>
         </TouchableOpacity>

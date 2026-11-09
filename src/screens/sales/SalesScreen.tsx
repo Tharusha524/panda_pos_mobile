@@ -22,6 +22,9 @@ import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSaleContext } from '@/context/PosSaleContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { colors, TAB_BAR_SCROLL_PADDING } from '@/theme';
+import { LOCKED_STYLE, MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
+import type { SaleTransactionMode } from '@/types/sales';
 import { summarizeCartQtyByUom } from '@/utils/uom';
 import type { SalesStackParamList } from '@/navigation/types';
 import type { InventoryItem } from '@/types/sales';
@@ -37,6 +40,18 @@ export const SalesScreen: React.FC = () => {
   const { showError } = useErrorDialog();
   const { currency } = usePosSettings();
   const pos = usePosSaleContext();
+  const { can, guard, showLocked } = useMobileAccess();
+  const lockedModes: SaleTransactionMode[] = [
+    ...(can(MP.salesReturn) ? [] : (['return'] as const)),
+    ...(can(MP.salesExchange) ? [] : (['exchange'] as const)),
+  ];
+  const handleModeChange = (mode: SaleTransactionMode) => {
+    if (lockedModes.includes(mode)) {
+      showLocked();
+      return;
+    }
+    pos.switchTransactionMode(mode);
+  };
   const { error: posError, setError: setPosError } = pos;
   const [exchangeAddMode, setExchangeAddMode] = useState<ExchangeAddMode>('sale');
   const isExchangeReturnMode = pos.isExchange && exchangeAddMode === 'return';
@@ -183,8 +198,8 @@ export const SalesScreen: React.FC = () => {
 
           {!pos.isReturn ? (
             <Pressable
-              onPress={() => navigation.navigate('HoldOrders')}
-              style={styles.holdBtn}
+              onPress={guard(MP.salesHold, () => navigation.navigate('HoldOrders'))}
+              style={[styles.holdBtn, !can(MP.salesHold) && LOCKED_STYLE]}
               accessibilityRole="button"
               accessibilityLabel="Hold orders">
               <PauseCircle size={16} color={colors.text} />
@@ -201,7 +216,8 @@ export const SalesScreen: React.FC = () => {
 
         <SaleModeToggle
           mode={pos.transactionMode}
-          onChange={pos.switchTransactionMode}
+          onChange={handleModeChange}
+          lockedModes={lockedModes}
           compact
         />
 
@@ -312,7 +328,9 @@ export const SalesScreen: React.FC = () => {
         customers={pos.customers}
         customer={pos.customer}
         onSelectCustomer={pos.selectCustomer}
-        onNewCustomer={() => navigation.navigate('CustomerForm', { selectOnSave: true })}
+        onNewCustomer={guard(MP.salesCreateCustomer, () =>
+          navigation.navigate('CustomerForm', { selectOnSave: true }),
+        )}
         onConfirm={pos.lockRouteSelection}
         currency={currency}
       />

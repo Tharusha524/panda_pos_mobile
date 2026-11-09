@@ -15,6 +15,8 @@ import { formatCurrency } from '@/utils/format';
 import { colors } from '@/theme';
 import type { ProductsStackParamList } from '@/navigation/types';
 import type { PurchaseRecord } from '@/types/inventory';
+import { LOCKED_STYLE, MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 type Nav = NativeStackNavigationProp<ProductsStackParamList, 'PurchasesList'>;
 
@@ -23,6 +25,7 @@ export const PurchasesScreen: React.FC = () => {
   const { showError } = useErrorDialog();
   const { currency } = usePosSettings();
   const purchases = usePurchases();
+  const { can, guard } = useMobileAccess();
 
   useEffect(() => {
     if (purchases.error) {
@@ -55,8 +58,8 @@ export const PurchasesScreen: React.FC = () => {
         showBack
         rightSlot={
           <TouchableOpacity
-            onPress={() => navigation.navigate('PurchaseCreate')}
-            style={{ padding: 8 }}>
+            onPress={guard(MP.purchasesCreate, () => navigation.navigate('PurchaseCreate'))}
+            style={[{ padding: 8 }, !can(MP.purchasesCreate) && LOCKED_STYLE]}>
             <Plus size={24} color={colors.primary} />
           </TouchableOpacity>
         }

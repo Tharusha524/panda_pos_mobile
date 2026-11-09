@@ -29,6 +29,8 @@ import {
 import type { ReportFilterParams } from '@/types/reportFilters';
 import type { BackendReportData } from '@/types/backendReports';
 import { colors, typography } from '@/theme';
+import { MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 
 const isPrinterSetupError = (msg: string): boolean =>
   /no printer|not configured|settings/i.test(msg);
@@ -51,6 +53,7 @@ const rowKey = (itemNumber: string | null | undefined, description: string | nul
 export const DayEndReportScreen: React.FC = () => {
   const { showError, showConfirm } = useErrorDialog();
   const { settings, currency } = usePosSettings();
+  const { can, guard } = useMobileAccess();
   const header = useMemo(() => buildHeader(settings), [settings]);
   const [printing, setPrinting] = useState(false);
   const [exportingExcel, setExportingExcel] = useState<'download' | 'share' | null>(null);
@@ -436,21 +439,24 @@ export const DayEndReportScreen: React.FC = () => {
             <Box gap="$2" mt="$4" mb="$2">
               <PrimaryButton
                 label={printing ? 'Printing…' : 'Print via Bluetooth'}
-                onPress={handlePrint}
+                locked={!can(MP.reportsPrint)}
+                onPress={guard(MP.reportsPrint, handlePrint)}
                 loading={printing}
                 disabled={printing}
               />
               <PrimaryButton
                 label={exportingExcel === 'download' ? 'Saving…' : 'Download Excel'}
                 variant="outline"
-                onPress={() => handleExportExcel('download')}
+                locked={!can(MP.reportsExport)}
+                onPress={guard(MP.reportsExport, () => handleExportExcel('download'))}
                 loading={exportingExcel === 'download'}
                 disabled={exportingExcel != null}
               />
               <PrimaryButton
                 label={exportingExcel === 'share' ? 'Sharing…' : 'Share Excel'}
                 variant="outline"
-                onPress={() => handleExportExcel('share')}
+                locked={!can(MP.reportsExport)}
+                onPress={guard(MP.reportsExport, () => handleExportExcel('share'))}
                 loading={exportingExcel === 'share'}
                 disabled={exportingExcel != null}
               />

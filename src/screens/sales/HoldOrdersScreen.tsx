@@ -34,6 +34,8 @@ import { formatCurrency } from '@/utils/format';
 import { captureReceiptBase64 } from '@/utils/receiptImageShare';
 import { getReceiptPrintCustomization } from '@/utils/receiptPrintCustomization';
 import { appInputStyle, colors, shadows, TAB_BAR_SCROLL_PADDING, typography } from '@/theme';
+import { LOCKED_STYLE, MP } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 import type { SalesStackParamList } from '@/navigation/types';
 
 type Nav = NativeStackNavigationProp<SalesStackParamList, 'HoldOrders'>;
@@ -63,6 +65,8 @@ const withHoldFlags = (receipt: SaleReceiptPayload): SaleReceiptPayload => {
 
 export const HoldOrdersScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
+  const { can, guard } = useMobileAccess();
+  const canDeleteHold = can(MP.salesHoldDelete);
   const pos = usePosSaleContext();
   const notifyRefresh = useDataRefreshNotify();
   const { currency, settings } = usePosSettings();
@@ -413,7 +417,8 @@ export const HoldOrdersScreen: React.FC = () => {
               </Text>
               <PrimaryButton
                 label={bulkDeleting ? 'Deleting all…' : 'Delete all'}
-                onPress={handleDeleteAll}
+                locked={!canDeleteHold}
+                onPress={guard(MP.salesHoldDelete, handleDeleteAll)}
                 loading={bulkDeleting}
                 disabled={busy}
                 variant="outline"
@@ -441,12 +446,13 @@ export const HoldOrdersScreen: React.FC = () => {
                   </Text>
                 </View>
                 <Pressable
-                  onPress={() => handleDelete(order)}
+                  onPress={guard(MP.salesHoldDelete, () => handleDelete(order))}
                   disabled={busy}
                   style={({ pressed }) => [
                     styles.deleteIconBtn,
                     pressed && styles.deleteIconBtnPressed,
                     busy && styles.deleteIconBtnDisabled,
+                    !canDeleteHold && LOCKED_STYLE,
                   ]}
                   accessibilityRole="button"
                   accessibilityLabel={`Delete hold ${order.sales_id}`}>
@@ -480,7 +486,8 @@ export const HoldOrdersScreen: React.FC = () => {
                 />
                 <PrimaryButton
                   label={deletingId === order.id ? 'Deleting…' : 'Delete hold'}
-                  onPress={() => handleDelete(order)}
+                  locked={!canDeleteHold}
+                  onPress={guard(MP.salesHoldDelete, () => handleDelete(order))}
                   loading={deletingId === order.id}
                   disabled={busy}
                   variant="outline"

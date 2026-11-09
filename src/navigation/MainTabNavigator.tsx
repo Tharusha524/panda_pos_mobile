@@ -8,11 +8,15 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   LayoutDashboard,
+  Lock,
   ShoppingCart,
   Package,
   User,
   FileText,
 } from 'lucide-react-native';
+import { LockedScreen } from '@/components/common/LockedScreen';
+import { TAB_PERMISSION } from '@/constants/mobilePermissions';
+import { useMobileAccess } from '@/hooks/useMobileAccess';
 import { HomeStackNavigator } from '@/navigation/HomeStackNavigator';
 import { SettingsStackNavigator } from '@/navigation/SettingsStackNavigator';
 import { SalesStackNavigator } from '@/navigation/SalesStackNavigator';
@@ -38,7 +42,7 @@ const TAB_ROOT_SCREEN: Record<keyof MainTabParamList, string> = {
 };
 
 const tabIcon =
-  (Icon: typeof LayoutDashboard) =>
+  (Icon: typeof LayoutDashboard, locked: boolean) =>
   ({
     color,
     size,
@@ -49,17 +53,53 @@ const tabIcon =
     focused: boolean;
   }) =>
     (
-      <View style={[styles.iconWrap, focused && styles.iconWrapActive]}>
+      <View
+        style={[
+          styles.iconWrap,
+          focused && !locked && styles.iconWrapActive,
+          locked && styles.iconWrapLocked,
+        ]}>
         <Icon
           size={focused ? size : size - 1}
-          color={focused ? colors.primary : color}
+          color={locked ? colors.textMuted : focused ? colors.primary : color}
           strokeWidth={focused ? 2.5 : 2}
         />
+        {locked ? (
+          <View style={styles.lockBadge}>
+            <Lock size={10} color={colors.white} strokeWidth={3} />
+          </View>
+        ) : null}
       </View>
     );
 
+const TAB_STACKS = {
+  Home: HomeStackNavigator,
+  Sales: SalesStackNavigator,
+  Products: ProductsStackNavigator,
+  Reports: ReportsStackNavigator,
+  Profile: SettingsStackNavigator,
+} as const;
+
 export const MainTabNavigator: React.FC = () => {
   const insets = useSafeAreaInsets();
+  const { can, showLocked } = useMobileAccess();
+  const isLocked = (tab: keyof MainTabParamList) => {
+    const key = TAB_PERMISSION[tab];
+    return key !== null && !can(key);
+  };
+  const initialTab =
+    (['Sales', 'Home', 'Products', 'Reports'] as const).find(tab => !isLocked(tab)) ??
+    'Profile';
+  const tabComponent = (tab: keyof MainTabParamList) =>
+    isLocked(tab) ? LockedScreen : TAB_STACKS[tab];
+  // tabPress is preventable at runtime (bottom-tabs emits canPreventDefault:
+  // true); the installed core/native typings disagree, hence the cast.
+  const onTabPress = (tab: keyof MainTabParamList, e: object) => {
+    if (isLocked(tab)) {
+      (e as { preventDefault: () => void }).preventDefault();
+      showLocked();
+    }
+  };
   const bottomOffset = Math.max(insets.bottom, TAB_BAR_BOTTOM_MARGIN);
   const baseTabBarStyle = {
     position: 'absolute' as const,
@@ -88,7 +128,7 @@ export const MainTabNavigator: React.FC = () => {
 
       return {
         tabBarLabel: label,
-        tabBarIcon: tabIcon(Icon),
+        tabBarIcon: tabIcon(Icon, isLocked(tab)),
         tabBarStyle: showTabBar
           ? baseTabBarStyle
           : [baseTabBarStyle, { display: 'none' as const }],
@@ -97,7 +137,7 @@ export const MainTabNavigator: React.FC = () => {
 
   return (
     <Tab.Navigator
-      initialRouteName="Sales"
+      initialRouteName={initialTab}
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
@@ -123,27 +163,32 @@ export const MainTabNavigator: React.FC = () => {
       }}>
       <Tab.Screen
         name="Home"
-        component={HomeStackNavigator}
+        component={tabComponent('Home')}
+        listeners={{ tabPress: e => onTabPress('Home', e) }}
         options={tabOptions('Home', 'Home', LayoutDashboard)}
       />
       <Tab.Screen
         name="Sales"
-        component={SalesStackNavigator}
+        component={tabComponent('Sales')}
+        listeners={{ tabPress: e => onTabPress('Sales', e) }}
         options={tabOptions('Sales', 'Sales', ShoppingCart)}
       />
       <Tab.Screen
         name="Products"
-        component={ProductsStackNavigator}
+        component={tabComponent('Products')}
+        listeners={{ tabPress: e => onTabPress('Products', e) }}
         options={tabOptions('Products', 'Products', Package)}
       />
       <Tab.Screen
         name="Reports"
-        component={ReportsStackNavigator}
+        component={tabComponent('Reports')}
+        listeners={{ tabPress: e => onTabPress('Reports', e) }}
         options={tabOptions('Reports', 'Reports', FileText)}
       />
       <Tab.Screen
         name="Profile"
-        component={SettingsStackNavigator}
+        component={tabComponent('Profile')}
+        listeners={{ tabPress: e => onTabPress('Profile', e) }}
         options={tabOptions('Profile', 'Settings', User)}
       />
     </Tab.Navigator>
@@ -160,5 +205,19 @@ const styles = StyleSheet.create({
   },
   iconWrapActive: {
     backgroundColor: colors.white,
+  },
+  iconWrapLocked: {
+    opacity: 0.55,
+  },
+  lockBadge: {
+    position: 'absolute',
+    right: 2,
+    bottom: 2,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.textSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
