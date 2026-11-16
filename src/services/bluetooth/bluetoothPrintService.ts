@@ -223,6 +223,29 @@ const delay = (ms: number): Promise<void> =>
     setTimeout(resolve, ms);
   });
 
+// The settle wait after the final write is the printer draining its buffer onto
+// paper — nothing in the app needs to sit through it, since every print flow ends
+// on that write. Instead of blocking the caller (which left the cashier staring at
+// a spinner for seconds after the receipt had already come out), we record when the
+// printer will be free and let the NEXT print wait for it. connectAndPrepare
+// enforces this, so a second job can't reconnect mid-print and truncate the paper.
+let printerBusyUntilMs = 0;
+
+// How long a deferred final write still waits on the native success callback before
+// assuming it printed. Short, since the busy tracker covers the rest of the drain.
+const DEFERRED_SETTLE_GRACE_MS = 600;
+
+const markPrinterBusy = (ms: number): void => {
+  printerBusyUntilMs = Math.max(printerBusyUntilMs, Date.now() + ms);
+};
+
+const awaitPrinterIdle = async (): Promise<void> => {
+  const remaining = printerBusyUntilMs - Date.now();
+  if (remaining > 0) {
+    await delay(remaining);
+  }
+};
+
 const resolvePrinterProfile = async (
   profile?: PrinterProfileId,
 ): Promise<PrinterProfileId> => {
@@ -246,6 +269,9 @@ const printRawDataNative = async (
   type: PrinterConnectionType,
   base64Data: string,
   waitMs: number,
+  /** Hands `waitMs` to the printer-busy tracker instead of sleeping through it.
+   * Only for the last write of a print flow — see markPrinterBusy. */
+  deferSettle = false,
 ): Promise<void> => {
   const native =
     type === 'network' ? NativeModules.RNNetPrinter : NativeModules.RNBLEPrinter;
@@ -271,6 +297,9 @@ const printRawDataNative = async (
       native.printRawData(base64Data, (error: string) => {
         if (error) {
           finish(error);
+        } else if (deferSettle) {
+          markPrinterBusy(waitMs);
+          finish();
         } else {
           setTimeout(() => finish(), waitMs);
         }
@@ -284,7 +313,18 @@ const printRawDataNative = async (
     // above even though the job printed successfully — don't hang the
     // UI forever waiting for it. Give the normal path (which resolves
     // ~waitMs after a real success callback) priority by waiting longer
-    // here before assuming success on its behalf.
+    // here before assuming success on its behalf. When deferring, cap that
+    // grace period instead of scaling it with the receipt length, so a
+    // silent printer module still frees the caller quickly — the remaining
+    // settle time carries over to the busy tracker rather than being lost.
+    if (deferSettle) {
+      const grace = Math.min(waitMs, DEFERRED_SETTLE_GRACE_MS);
+      setTimeout(() => {
+        markPrinterBusy(waitMs - grace);
+        finish();
+      }, grace);
+      return;
+    }
     setTimeout(() => finish(), waitMs * 2);
   });
 };
@@ -303,10 +343,11 @@ const printRawDataChunked = async (
   base64Data: string,
   finalWaitMs: number,
   delayMultiplier = 1,
+  deferSettle = false,
 ): Promise<void> => {
   const bytes = base64ToBytes(base64Data);
   if (bytes.length <= RAW_CHUNK_SIZE_BYTES) {
-    await printRawDataNative(type, base64Data, finalWaitMs);
+    await printRawDataNative(type, base64Data, finalWaitMs, deferSettle);
     return;
   }
 
@@ -337,7 +378,7 @@ const printRawDataChunked = async (
     const isLast = i === chunks.length - 1;
     if (isLast) {
       // Wait for the real settle delay after the final chunk, same as an unchunked send.
-      await printRawDataNative(type, chunkBase64, finalWaitMs);
+      await printRawDataNative(type, chunkBase64, finalWaitMs, deferSettle);
     } else {
       // The native write itself returns almost instantly (it hands off to a background
       // thread) — what we're actually pacing is the printer's buffer, not this call, so
@@ -388,7 +429,9 @@ const sendRawText = async (
     // Glue the warm-up byte onto the front of this same write — see comment
     // on WARM_UP_BYTE_BASE64 above for why it can't be its own transmission.
     base64 = bytesToBase64([...base64ToBytes(WARM_UP_BYTE_BASE64), ...base64ToBytes(base64)]);
-    await printRawDataChunked(type, base64, waitMs, behavior.printDelayMultiplier);
+    // Every caller ends its print flow on this write, so its settle wait is deferred
+    // to the busy tracker rather than blocking the caller.
+    await printRawDataChunked(type, base64, waitMs, behavior.printDelayMultiplier, true);
   };
 
   try {
@@ -412,6 +455,11 @@ const connectAndPrepare = async (
   address: string,
   profile?: PrinterProfileId,
 ): Promise<void> => {
+  // Reconnecting closes the socket (see connectToAddress's strict path), which would
+  // cut off a previous receipt still draining onto paper — so hold here until the
+  // printer is done. Every print flow starts with this call, which is what makes
+  // deferring the settle wait safe.
+  await awaitPrinterIdle();
   await connectPrinter(type, address, true);
   const behavior = getPrinterProfileBehavior(await resolvePrinterProfile(profile));
   if (behavior.useDirectRawPrint) {
@@ -500,9 +548,12 @@ const printLocalLogoFile = async (
   type: PrinterConnectionType,
   filePath: string,
   behavior: PrinterProfileBehavior,
+  trimBlankEdges = false,
 ): Promise<void> => {
   const imageBase64 = await RNBlobUtil.fs.readFile(filePath, 'base64');
-  const bands = buildEscPosRasterBandsBase64FromImage(imageBase64, behavior.logoMaxWidthPx);
+  const bands = buildEscPosRasterBandsBase64FromImage(imageBase64, behavior.logoMaxWidthPx, {
+    trimBlankEdges,
+  });
   await printRasterBands(type, bands, behavior);
 };
 
@@ -540,7 +591,30 @@ const printResolvedLogo = async (
     return;
   }
   if (logo.kind === 'local') {
-    await printLocalLogoFile(type, logo.filePath, behavior);
+    await printLocalLogoFile(type, logo.filePath, behavior, true);
+    return;
+  }
+  // The native printImageData path drops transparency (its getRGB rebuilds every
+  // pixel as fully opaque), so a transparent PNG's background prints as a solid
+  // black block. Download the logo and run it through our own raster encoder,
+  // which treats transparent pixels as white. Capped at 200px wide to match the
+  // size the native path printed. Any download/decode failure happens before
+  // anything is sent, so falling back to the native path can't double-print.
+  let bands: string[] | null = null;
+  try {
+    const res = await RNBlobUtil.config({ timeout: 8000 }).fetch('GET', logo.url);
+    if (res.info().status === 200) {
+      bands = buildEscPosRasterBandsBase64FromImage(
+        res.base64(),
+        Math.min(behavior.logoMaxWidthPx, 200),
+        { trimBlankEdges: true },
+      );
+    }
+  } catch {
+    bands = null;
+  }
+  if (bands && bands.length > 0) {
+    await printRasterBands(type, bands, behavior);
     return;
   }
   await printRemoteLogoImage(type, logo.url, behavior);

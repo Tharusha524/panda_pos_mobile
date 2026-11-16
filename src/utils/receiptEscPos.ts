@@ -246,14 +246,34 @@ export const buildEscPosReceipt = (
   );
   lines.push(escDivider(ctx, '='));
 
-  // 'left' explicitly — these sit among left-anchored ledger rows (Received/Balance,
-  // Name/Phone No/Address), so they must not fall back to the general center-align rule.
-  lines.push(escLine(ctx, `Paid By ${sale.payment_method ?? 'Cash'}`, 'left'));
+  // Payment method block — mirrors the image receipt: single-method shows Bank/Cheque
+  // when present; Split shows each split line with its own amount, Cheque #, and Bank.
+  // 'left' explicitly so these stay left-anchored among the ledger rows below.
+  if (sale.payment_method === 'Split' && sale.payment_splits && sale.payment_splits.length > 0) {
+    for (const split of sale.payment_splits) {
+      const methodLabel =
+        split.cheque_number?.trim()
+          ? `${split.payment_method} #${split.cheque_number.trim()}`.slice(0, 18)
+          : split.payment_method.slice(0, 18);
+      lines.push(escPadLine(ctx, methodLabel, formatPlainAmount(split.amount)));
+      if (split.bank_name?.trim()) {
+        lines.push(escPadLine(ctx, 'Bank', split.bank_name.trim().slice(0, 18)));
+      }
+    }
+  } else {
+    lines.push(escLine(ctx, `Paid By ${sale.payment_method ?? 'Cash'}`, 'left'));
+    if (sale.bank_name?.trim()) {
+      lines.push(escPadLine(ctx, 'Bank', sale.bank_name.trim().slice(0, 18)));
+    }
+    if (sale.cheque_number?.trim()) {
+      lines.push(escPadLine(ctx, 'Cheque #', sale.cheque_number.trim().slice(0, 18)));
+    }
+  }
   if (!isHold && sale.amount_received != null) {
     lines.push(escPadLine(ctx, 'Received', formatPlainAmount(sale.amount_received)));
     const change = sale.amount_received - displayNetAmount;
     if (change >= 0) {
-      lines.push(escPadLine(ctx, 'Balance', formatPlainAmount(change)));
+      lines.push(escPadLine(ctx, 'Change', formatPlainAmount(change)));
     }
   }
   // Customer's total amount owed overall — distinct from "Balance" above, which is
@@ -316,6 +336,9 @@ export const buildEscPosReceipt = (
       )}`,
     ),
   );
+  if (sale.show_barcode && sale.barcode_value?.trim()) {
+    lines.push(escHeaderLine(ctx, sale.barcode_value.trim()));
+  }
   lines.push(escLine(ctx, ''));
   lines.push(escLine(ctx, ''));
 

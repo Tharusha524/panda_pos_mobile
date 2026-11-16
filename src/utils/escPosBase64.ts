@@ -22,6 +22,17 @@ export const bytesToBase64 = (bytes: number[] | Uint8Array): string => {
   return output;
 };
 
+// char code → 6-bit value ('=' → 64, same as BASE64_CHARS.indexOf gave). A table
+// lookup instead of indexOf per character — this decodes the full receipt image
+// for raster printing, where the old linear scan cost seconds on its own.
+const DECODE_TABLE = (() => {
+  const table = new Uint8Array(128).fill(64);
+  for (let i = 0; i < BASE64_CHARS.length; i++) {
+    table[BASE64_CHARS.charCodeAt(i)] = i;
+  }
+  return table;
+})();
+
 export const base64ToBytes = (base64: string): Uint8Array => {
   const normalized = base64.replace(/[^A-Za-z0-9+/=]/g, '');
   const padding = normalized.endsWith('==') ? 2 : normalized.endsWith('=') ? 1 : 0;
@@ -30,10 +41,10 @@ export const base64ToBytes = (base64: string): Uint8Array => {
   let byteIndex = 0;
 
   for (let i = 0; i < normalized.length; i += 4) {
-    const enc1 = BASE64_CHARS.indexOf(normalized[i]);
-    const enc2 = BASE64_CHARS.indexOf(normalized[i + 1]);
-    const enc3 = BASE64_CHARS.indexOf(normalized[i + 2]);
-    const enc4 = BASE64_CHARS.indexOf(normalized[i + 3]);
+    const enc1 = DECODE_TABLE[normalized.charCodeAt(i)];
+    const enc2 = DECODE_TABLE[normalized.charCodeAt(i + 1)];
+    const enc3 = DECODE_TABLE[normalized.charCodeAt(i + 2)];
+    const enc4 = DECODE_TABLE[normalized.charCodeAt(i + 3)];
     const chr1 = (enc1 << 2) | (enc2 >> 4);
     const chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
     const chr3 = ((enc3 & 3) << 6) | enc4;

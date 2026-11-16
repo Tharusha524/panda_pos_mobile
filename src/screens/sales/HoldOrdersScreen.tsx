@@ -31,7 +31,7 @@ import { navigateToPrinterSetup } from '@/navigation/navigationRef';
 import type { SaleRecord } from '@/types/sales';
 import type { SaleReceiptPayload } from '@/types/sales';
 import { formatCurrency } from '@/utils/format';
-import { captureReceiptBase64 } from '@/utils/receiptImageShare';
+import { captureReceiptForPrint } from '@/utils/receiptImageShare';
 import { getReceiptPrintCustomization } from '@/utils/receiptPrintCustomization';
 import { appInputStyle, colors, shadows, TAB_BAR_SCROLL_PADDING, typography } from '@/theme';
 import { LOCKED_STYLE, MP } from '@/constants/mobilePermissions';
@@ -159,7 +159,10 @@ export const HoldOrdersScreen: React.FC = () => {
             );
           }
           setPreviewReceipt(receipt);
-          capturedImageBase64 = await captureReceiptBase64(previewShotRef);
+          capturedImageBase64 = await captureReceiptForPrint(
+            previewShotRef,
+            customization.paperWidth,
+          );
         }
       } catch {
         // Couldn't read the setting or capture the preview — fall back to the

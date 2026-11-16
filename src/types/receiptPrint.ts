@@ -53,6 +53,11 @@ export interface ReceiptPrintCustomization {
    * translucent line), since a thin, partly-transparent line is exactly the kind
    * of pixel that gets lost when the receipt is converted to printer dots. */
   receiptDividerThicknessPx: number;
+  /** Vertical space between receipt rows/sections in the on-screen preview /
+   * printed image, as a percentage of the original design (100 = unchanged).
+   * Lower values print a shorter receipt; every gap scales together so the
+   * layout keeps its proportions instead of some rows bunching up. */
+  receiptRowSpacingPercent: number;
 }
 
 export const DEFAULT_RECEIPT_PRINT_CUSTOMIZATION: ReceiptPrintCustomization = {
@@ -78,4 +83,5 @@ export const DEFAULT_RECEIPT_PRINT_CUSTOMIZATION: ReceiptPrintCustomization = {
   receiptCompanyDetailsSizePx: 12,
   receiptCompanyDetailsWeight: 'regular',
   receiptDividerThicknessPx: 1,
+  receiptRowSpacingPercent: 100,
 };

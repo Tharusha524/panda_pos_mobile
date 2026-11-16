@@ -129,11 +129,14 @@ const SizeStepper: React.FC<{
   min: number;
   max: number;
   step: number;
+  /** Shown next to the number; defaults to px. */
+  unit?: string;
   onChange: (v: number) => void;
-}> = ({ label, value, min, max, step, onChange }) => (
+}> = ({ label, value, min, max, step, unit = 'px', onChange }) => (
   <VStack mb="$4">
     <Text fontSize="$xs" fontWeight="$semibold" color="$textLight400" mb="$2">
-      {label} ({value}px)
+      {label} ({value}
+      {unit})
     </Text>
     <HStack alignItems="center" gap="$3">
       <Pressable
@@ -144,7 +147,8 @@ const SizeStepper: React.FC<{
         </Text>
       </Pressable>
       <Text fontSize="$sm" fontWeight="$semibold" color="$textLight0">
-        {value}px
+        {value}
+        {unit}
       </Text>
       <Pressable
         onPress={() => onChange(Math.min(max, value + step))}
@@ -156,6 +160,16 @@ const SizeStepper: React.FC<{
     </HStack>
   </VStack>
 );
+
+const ROW_SPACING_PRESETS = [
+  { id: 'compact', label: 'Compact', percent: 60 },
+  { id: 'normal', label: 'Normal', percent: 100 },
+  { id: 'wide', label: 'Wide', percent: 130 },
+];
+
+/** Highlights the matching chip, or none when fine-tuned to an in-between value. */
+const rowSpacingPreset = (percent: number): string =>
+  ROW_SPACING_PRESETS.find(p => p.percent === percent)?.id ?? '';
 
 const WEIGHT_OPTIONS = [
   { id: 'regular', label: 'Regular' },
@@ -581,6 +595,27 @@ export const ReceiptCustomizeScreen: React.FC = () => {
               max={6}
               step={1}
               onChange={v => patch({ receiptDividerThicknessPx: v })}
+            />
+
+            <ChipRow
+              label="Row spacing (receipt length)"
+              value={rowSpacingPreset(form.receiptRowSpacingPercent)}
+              onChange={id =>
+                patch({
+                  receiptRowSpacingPercent:
+                    ROW_SPACING_PRESETS.find(p => p.id === id)?.percent ?? 100,
+                })
+              }
+              options={ROW_SPACING_PRESETS}
+            />
+            <SizeStepper
+              label="Row spacing fine tune"
+              value={form.receiptRowSpacingPercent}
+              min={40}
+              max={140}
+              step={5}
+              unit="%"
+              onChange={v => patch({ receiptRowSpacingPercent: v })}
             />
           </Box>
 

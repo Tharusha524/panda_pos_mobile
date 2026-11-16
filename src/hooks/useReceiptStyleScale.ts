@@ -26,6 +26,9 @@ export interface ReceiptStyleScale {
   /** Scaled font size only, no weight override — for text that must keep its own
    * fixed weight (e.g. a grand total) regardless of the body text weight setting. */
   bodyTextSizeOnly: (base: number) => TextStyle;
+  /** Scales a vertical gap (margin/padding px) by the row spacing setting. A gap
+   * the design made non-zero never collapses to 0, so rows can't touch. */
+  space: (base: number) => number;
   companyNameStyle: TextStyle;
   companyDetailsStyle: TextStyle;
   dividerOverride: { height: number };
@@ -67,6 +70,10 @@ export const useReceiptStyleScale = (
   });
   const bodyTextSizeOnly = (base: number): TextStyle => ({ fontSize: scaleFont(base) });
 
+  const spaceScale = customization.receiptRowSpacingPercent / 100;
+  const space = (base: number) =>
+    base <= 0 ? base : Math.max(1, Math.round(base * spaceScale));
+
   const logoWidth = customization.receiptLogoWidthPx;
   const logoHeight = Math.round(logoWidth * LOGO_ASPECT_RATIO);
 
@@ -91,6 +98,7 @@ export const useReceiptStyleScale = (
     scaleFont,
     bodyText,
     bodyTextSizeOnly,
+    space,
     companyNameStyle,
     companyDetailsStyle,
     dividerOverride,

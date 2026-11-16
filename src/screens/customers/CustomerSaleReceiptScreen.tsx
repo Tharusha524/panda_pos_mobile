@@ -15,7 +15,7 @@ import { usePosSettings } from '@/context/PosSettingsContext';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { navigateToPrinterSetup } from '@/navigation/navigationRef';
 import {
-  captureReceiptBase64,
+  captureReceiptForPrint,
   downloadReceiptAsImage,
   shareReceiptImageFile,
 } from '@/utils/receiptImageShare';
@@ -119,7 +119,10 @@ export const CustomerSaleReceiptScreen: React.FC = () => {
       try {
         const customization = await getReceiptPrintCustomization(settings);
         if (customization.printAsImage) {
-          capturedImageBase64 = await captureReceiptBase64(receiptShotRef);
+          capturedImageBase64 = await captureReceiptForPrint(
+            receiptShotRef,
+            customization.paperWidth,
+          );
         }
       } catch {
         // Couldn't read the setting or capture the preview — fall back to the

@@ -32,7 +32,7 @@ import {
   formatReportDateRangeLabel,
 } from '@/utils/reportDateFilters';
 import type { ReportFilterParams } from '@/types/reportFilters';
-import { captureReceiptBase64 } from '@/utils/receiptImageShare';
+import { captureReceiptForPrint } from '@/utils/receiptImageShare';
 import { supportsDateFilter, supportsItemFilter } from '@/constants/reportFilterCapabilities';
 import { downloadDailySalesExcel, shareDailySalesExcel } from '@/utils/dailySalesFile';
 import { downloadReportTableExcel, shareReportTableExcel } from '@/utils/reportTableFile';
@@ -334,7 +334,10 @@ export const ReportViewScreen: React.FC = () => {
       try {
         const customization = await getReceiptPrintCustomization(settings);
         if (customization.printAsImage) {
-          capturedImageBase64 = await captureReceiptBase64(reportShotRef);
+          capturedImageBase64 = await captureReceiptForPrint(
+            reportShotRef,
+            customization.paperWidth,
+          );
         }
       } catch {
         // Couldn't read the setting or capture the preview — fall back to the

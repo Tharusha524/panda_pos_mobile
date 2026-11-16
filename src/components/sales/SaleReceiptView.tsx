@@ -45,12 +45,38 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
   const {
     bodyText,
     bodyTextSizeOnly,
+    space,
     companyNameStyle,
     companyDetailsStyle,
     dividerOverride,
     logoWidth,
     logoHeight,
   } = useReceiptStyleScale(settings, customizationOverride);
+
+  // Every vertical gap on the receipt, scaled together by the Row spacing setting
+  // (see receiptRowSpacingPercent) — at 100% these equal the original styles.
+  const gap = {
+    logo: { marginBottom: space(8) },
+    detailLine: { marginTop: space(2) },
+    invoiceTitle: { marginTop: space(8) },
+    holdNotice: { marginTop: space(4) },
+    divider: { marginVertical: space(12) },
+    dividerThin: { marginBottom: space(4) },
+    metaBlock: { marginTop: space(8), marginBottom: space(8) },
+    partyBlock: { marginTop: space(4), marginBottom: space(8) },
+    sectionLabel: { marginTop: space(8) },
+    sectionLabelReturn: { marginTop: space(12) },
+    tableHead: { marginTop: space(4) },
+    lineRow: { paddingVertical: space(8) },
+    lineSub: { marginTop: space(2) },
+    grandRow: { marginTop: space(8) },
+    thankYou: { marginTop: space(4) },
+    softwareLine: { marginTop: space(8) },
+    footerNote: { marginTop: space(6) },
+    barcode: { marginTop: space(8) },
+  };
+  const metaRowPad = space(2);
+  const totalRowPad = space(4);
 
   const currency = resolveCurrencyCode(settings?.company?.currency);
   const companyName =
@@ -89,10 +115,10 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
     const uom = resolveLineUom(line.uom);
     const isReturnLine = line.line_direction === 'return';
     return (
-      <View key={`${line.item_number}-${idx}`} style={styles.lineRow}>
+      <View key={`${line.item_number}-${idx}`} style={[styles.lineRow, gap.lineRow]}>
         <VStack style={styles.colItem} flex={1}>
           <Text style={[styles.lineDesc, bodyText(13)]}>{line.description}</Text>
-          <Text style={[styles.lineSub, bodyText(11)]}>
+          <Text style={[styles.lineSub, gap.lineSub, bodyText(11)]}>
             {formatReceiptQtyDetail(
               line.qty,
               formatCurrency(line.unit_price, currency),
@@ -138,32 +164,33 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
       {showLogo && logoUrl ? (
         <Image
           source={{ uri: logoUrl }}
-          style={[styles.logo, { width: logoWidth, height: logoHeight }]}
+          style={[styles.logo, gap.logo, { width: logoWidth, height: logoHeight }]}
           resizeMode="contain"
         />
       ) : null}
 
       <Text style={[styles.companyName, companyNameStyle]}>{companyName}</Text>
       {address ? (
-        <Text style={[styles.mutedCenter, companyDetailsStyle]}>{address}</Text>
+        <Text style={[styles.mutedCenter, gap.detailLine, companyDetailsStyle]}>{address}</Text>
       ) : null}
       {phone ? (
-        <Text style={[styles.mutedCenter, companyDetailsStyle]}>Tel: {phone}</Text>
+        <Text style={[styles.mutedCenter, gap.detailLine, companyDetailsStyle]}>Tel: {phone}</Text>
       ) : null}
       {email ? (
-        <Text style={[styles.mutedCenter, companyDetailsStyle]}>{email}</Text>
+        <Text style={[styles.mutedCenter, gap.detailLine, companyDetailsStyle]}>{email}</Text>
       ) : null}
       {taxId ? (
-        <Text style={[styles.mutedCenter, companyDetailsStyle]}>Tax ID: {taxId}</Text>
+        <Text style={[styles.mutedCenter, gap.detailLine, companyDetailsStyle]}>Tax ID: {taxId}</Text>
       ) : null}
       {regNo ? (
-        <Text style={[styles.mutedCenter, companyDetailsStyle]}>Reg: {regNo}</Text>
+        <Text style={[styles.mutedCenter, gap.detailLine, companyDetailsStyle]}>Reg: {regNo}</Text>
       ) : null}
 
-      <View style={[styles.divider, dividerOverride]} />
+      <View style={[styles.divider, gap.divider, dividerOverride]} />
       <Text
         style={[
           styles.invoiceTitle,
+          gap.invoiceTitle,
           bodyText(14),
           sale.is_return
             ? { color: colors.error }
@@ -174,11 +201,11 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
         {invoiceTitle}
       </Text>
       {isHold ? (
-        <Text style={[styles.mutedCenter, styles.holdNotice, bodyText(12)]}>
+        <Text style={[styles.mutedCenter, styles.holdNotice, gap.holdNotice, bodyText(12)]}>
           Not paid — complete this hold bill to finalize
         </Text>
       ) : null}
-      <Text style={[styles.mutedCenter, bodyText(12)]}>
+      <Text style={[styles.mutedCenter, gap.detailLine, bodyText(12)]}>
         {sale.is_return
           ? 'Return No'
           : sale.is_exchange
@@ -187,25 +214,25 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
               ? 'Hold No'
               : 'Bill No'}: {sale.sales_id}
       </Text>
-      <Text style={[styles.mutedCenter, bodyText(12)]}>
+      <Text style={[styles.mutedCenter, gap.detailLine, bodyText(12)]}>
         All amounts in {getCurrencyLabel(currency)}
       </Text>
 
-      <View style={styles.metaBlock}>
-        <MetaRow label="Date" value={sale.sale_date} textStyle={bodyText(12)} />
+      <View style={[styles.metaBlock, gap.metaBlock]}>
+        <MetaRow label="Date" value={sale.sale_date} textStyle={bodyText(12)} padV={metaRowPad} />
         {sale.location ? (
-          <MetaRow label="Branch" value={sale.location} textStyle={bodyText(12)} />
+          <MetaRow label="Branch" value={sale.location} textStyle={bodyText(12)} padV={metaRowPad} />
         ) : null}
         <MetaRow
           label="Payment"
           value={sale.payment_method ?? 'Cash'}
-          textStyle={bodyText(12)}
+          textStyle={bodyText(12)} padV={metaRowPad}
         />
         {sale.payment_method !== 'Split' && sale.bank_name?.trim() ? (
-          <MetaRow label="Bank" value={sale.bank_name.trim()} textStyle={bodyText(12)} />
+          <MetaRow label="Bank" value={sale.bank_name.trim()} textStyle={bodyText(12)} padV={metaRowPad} />
         ) : null}
         {sale.payment_method !== 'Split' && sale.cheque_number?.trim() ? (
-          <MetaRow label="Cheque #" value={sale.cheque_number.trim()} textStyle={bodyText(12)} />
+          <MetaRow label="Cheque #" value={sale.cheque_number.trim()} textStyle={bodyText(12)} padV={metaRowPad} />
         ) : null}
         {sale.payment_method === 'Split' && sale.payment_splits && sale.payment_splits.length > 0
           ? sale.payment_splits.map((split, idx) => (
@@ -216,14 +243,14 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
                     (split.cheque_number?.trim() ? ` #${split.cheque_number.trim()}` : '')
                   }
                   value={formatCurrency(split.amount, currency)}
-                  textStyle={bodyText(12)}
-                />
+                  textStyle={bodyText(12)} padV={metaRowPad}
+        />
                 {split.bank_name?.trim() ? (
                   <MetaRow
                     label="Bank"
                     value={split.bank_name.trim()}
-                    textStyle={bodyText(12)}
-                  />
+                    textStyle={bodyText(12)} padV={metaRowPad}
+        />
                 ) : null}
               </React.Fragment>
             ))
@@ -232,16 +259,16 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
 
       {customerInfoRows.length > 0 ? (
         <>
-          <View style={[styles.dividerThin, dividerOverride]} />
-          <Text style={[styles.partyTitle, bodyText(11)]}>Customer Information</Text>
-          <View style={styles.partyBlock}>
+          <View style={[styles.dividerThin, gap.dividerThin, dividerOverride]} />
+          <Text style={[styles.partyTitle, gap.detailLine, bodyText(11)]}>Customer Information</Text>
+          <View style={[styles.partyBlock, gap.partyBlock]}>
             {customerInfoRows.map(row => (
               <MetaRow
                 key={row.label}
                 label={row.label}
                 value={String(row.value)}
-                textStyle={bodyText(12)}
-              />
+                textStyle={bodyText(12)} padV={metaRowPad}
+        />
             ))}
           </View>
         </>
@@ -249,67 +276,67 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
 
       {hasReturnLines ? (
         <>
-          <Text style={[styles.sectionLabel, bodyText(11)]}>SOLD ITEMS</Text>
-          <View style={styles.tableHead}>
+          <Text style={[styles.sectionLabel, gap.sectionLabel, bodyText(11)]}>SOLD ITEMS</Text>
+          <View style={[styles.tableHead, gap.tableHead]}>
             <Text style={[styles.th, styles.colItem, bodyText(11)]}>Item</Text>
             <Text style={[styles.th, styles.colQty, bodyText(11)]}>Qty</Text>
             <Text style={[styles.th, styles.colAmt, bodyText(11)]}>Amount</Text>
           </View>
-          <View style={[styles.dividerThin, dividerOverride]} />
+          <View style={[styles.dividerThin, gap.dividerThin, dividerOverride]} />
           {saleLines.map((line, idx) => renderLine(line, idx))}
 
-          <Text style={[styles.sectionLabel, styles.sectionLabelReturn, bodyText(11)]}>
+          <Text style={[styles.sectionLabel, styles.sectionLabelReturn, gap.sectionLabelReturn, bodyText(11)]}>
             RETURNED ITEMS
           </Text>
-          <View style={styles.tableHead}>
+          <View style={[styles.tableHead, gap.tableHead]}>
             <Text style={[styles.th, styles.colItem, bodyText(11)]}>Item</Text>
             <Text style={[styles.th, styles.colQty, bodyText(11)]}>Qty</Text>
             <Text style={[styles.th, styles.colAmt, bodyText(11)]}>Amount</Text>
           </View>
-          <View style={[styles.dividerThin, dividerOverride]} />
+          <View style={[styles.dividerThin, gap.dividerThin, dividerOverride]} />
           {returnLines.map((line, idx) => renderLine(line, idx))}
         </>
       ) : (
         <>
-          <View style={styles.tableHead}>
+          <View style={[styles.tableHead, gap.tableHead]}>
             <Text style={[styles.th, styles.colItem, bodyText(11)]}>Item</Text>
             <Text style={[styles.th, styles.colQty, bodyText(11)]}>Qty</Text>
             <Text style={[styles.th, styles.colAmt, bodyText(11)]}>Amount</Text>
           </View>
-          <View style={[styles.dividerThin, dividerOverride]} />
+          <View style={[styles.dividerThin, gap.dividerThin, dividerOverride]} />
           {sale.lines.map((line, idx) => renderLine(line, idx))}
         </>
       )}
 
-      <View style={[styles.divider, dividerOverride]} />
+      <View style={[styles.divider, gap.divider, dividerOverride]} />
 
       <TotalRow
         label="Subtotal"
         value={formatCurrency(sale.sub_total, currency)}
-        textStyle={bodyText(13)}
-      />
+        textStyle={bodyText(13)} padV={totalRowPad}
+        />
       {(sale.return_sub_total ?? 0) > 0 ? (
         <TotalRow
           label="Return credit"
           value={`-${formatCurrency(sale.return_sub_total ?? 0, currency)}`}
-          textStyle={bodyText(13)}
+          textStyle={bodyText(13)} padV={totalRowPad}
         />
       ) : null}
       {sale.discount > 0 ? (
         <TotalRow
           label={discountLabel}
           value={`-${formatCurrency(sale.discount, currency)}`}
-          textStyle={bodyText(13)}
+          textStyle={bodyText(13)} padV={totalRowPad}
         />
       ) : null}
       {(sale.service_charge ?? 0) > 0 ? (
         <TotalRow
           label="Service charge"
           value={formatCurrency(sale.service_charge ?? 0, currency)}
-          textStyle={bodyText(13)}
+          textStyle={bodyText(13)} padV={totalRowPad}
         />
       ) : null}
-      <View style={styles.grandRow}>
+      <View style={[styles.grandRow, gap.grandRow]}>
         <Text style={[styles.grandLabel, bodyTextSizeOnly(16)]}>
           {isHold
             ? 'AMOUNT DUE'
@@ -328,14 +355,14 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
           <TotalRow
             label="Received"
             value={formatCurrency(sale.amount_received, currency)}
-            textStyle={bodyText(13)}
-          />
+            textStyle={bodyText(13)} padV={totalRowPad}
+        />
           {change != null && change >= 0 ? (
             <TotalRow
               label="Change"
               value={formatCurrency(change, currency)}
-              textStyle={bodyText(13)}
-            />
+              textStyle={bodyText(13)} padV={totalRowPad}
+        />
           ) : null}
         </>
       ) : null}
@@ -343,40 +370,45 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
         <TotalRow
           label="Outstanding balance"
           value={formatCurrency(customerOutstandingBalance, currency)}
-          textStyle={bodyText(13)}
+          textStyle={bodyText(13)} padV={totalRowPad}
         />
       ) : null}
 
-      <View style={[styles.divider, dividerOverride]} />
-      <Text style={[styles.thankYou, bodyText(13)]}>Thank you for your business!</Text>
-      <Text style={[styles.softwareLine, bodyText(11)]}>{RECEIPT_SOFTWARE_PROVIDER}</Text>
-      <Text style={[styles.softwareLine, bodyText(11)]}>{RECEIPT_SOFTWARE_WEBSITE}</Text>
-      <Text style={[styles.footerNote, bodyText(10)]}>Printed: {printedAt}</Text>
+      <View style={[styles.divider, gap.divider, dividerOverride]} />
+      <Text style={[styles.thankYou, gap.thankYou, bodyText(13)]}>Thank you for your business!</Text>
+      <Text style={[styles.softwareLine, gap.softwareLine, bodyText(11)]}>{RECEIPT_SOFTWARE_PROVIDER}</Text>
+      <Text style={[styles.softwareLine, gap.detailLine, bodyText(11)]}>{RECEIPT_SOFTWARE_WEBSITE}</Text>
+      <Text style={[styles.footerNote, gap.footerNote, bodyText(10)]}>Printed: {printedAt}</Text>
       {sale.show_barcode && sale.barcode_value ? (
-        <Text style={[styles.barcode, bodyText(11)]}>{sale.barcode_value}</Text>
+        <Text style={[styles.barcode, gap.barcode, bodyText(11)]}>{sale.barcode_value}</Text>
       ) : null}
     </View>
   );
 };
 
+// padV replaces the original py="$0.5" / py="$1" tokens (2px / 4px) so these
+// per-row paddings scale with the Row spacing setting too — they repeat on every
+// meta and total line, so they add up over a long bill.
 const MetaRow: React.FC<{
   label: string;
   value: string;
   textStyle?: TextStyle;
   valueStyle?: TextStyle;
-}> = ({ label, value, textStyle, valueStyle }) => (
-  <HStack justifyContent="space-between" py="$0.5">
+  padV: number;
+}> = ({ label, value, textStyle, valueStyle, padV }) => (
+  <HStack justifyContent="space-between" style={{ paddingVertical: padV }}>
     <Text style={[styles.metaLabel, textStyle, valueStyle]}>{label}</Text>
     <Text style={[styles.metaValue, textStyle, valueStyle]}>{value}</Text>
   </HStack>
 );
 
-const TotalRow: React.FC<{ label: string; value: string; textStyle?: TextStyle }> = ({
-  label,
-  value,
-  textStyle,
-}) => (
-  <HStack justifyContent="space-between" py="$1">
+const TotalRow: React.FC<{
+  label: string;
+  value: string;
+  textStyle?: TextStyle;
+  padV: number;
+}> = ({ label, value, textStyle, padV }) => (
+  <HStack justifyContent="space-between" style={{ paddingVertical: padV }}>
     <Text style={[styles.totalLabel, textStyle]}>{label}</Text>
     <Text style={[styles.totalValue, textStyle]}>{value}</Text>
   </HStack>

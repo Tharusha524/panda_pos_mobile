@@ -16,7 +16,7 @@ import { stockTransferService } from '@/services/api/stockTransferService';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { navigateToPrinterSetup } from '@/navigation/navigationRef';
 import { downloadDayEndReportExcel, shareDayEndReportExcel } from '@/utils/dayEndReportFile';
-import { captureReceiptBase64 } from '@/utils/receiptImageShare';
+import { captureReceiptForPrint } from '@/utils/receiptImageShare';
 import {
   buildPrintHeaderFromSettings as buildHeader,
   getReceiptPrintCustomization,
@@ -284,7 +284,10 @@ export const DayEndReportScreen: React.FC = () => {
       try {
         const customization = await getReceiptPrintCustomization(settings);
         if (customization.printAsImage) {
-          capturedImageBase64 = await captureReceiptBase64(reportShotRef);
+          capturedImageBase64 = await captureReceiptForPrint(
+            reportShotRef,
+            customization.paperWidth,
+          );
         }
       } catch {
         // Couldn't read the setting or capture the preview — fall back to

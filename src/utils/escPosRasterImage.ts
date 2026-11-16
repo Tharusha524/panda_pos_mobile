@@ -1,36 +1,6 @@
 import { decode as decodeJpeg } from 'jpeg-js';
 import { decode as decodePng, convertIndexedToRgb, hasPngSignature } from 'fast-png';
-import { bytesToBase64 } from '@/utils/escPosBase64';
-
-const base64ToBytes = (base64: string): Uint8Array => {
-  const BASE64_CHARS =
-    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  const normalized = base64.replace(/[^A-Za-z0-9+/=]/g, '');
-  const padding = normalized.endsWith('==') ? 2 : normalized.endsWith('=') ? 1 : 0;
-  const byteLength = (normalized.length * 3) / 4 - padding;
-  const bytes = new Uint8Array(byteLength);
-  let byteIndex = 0;
-
-  for (let i = 0; i < normalized.length; i += 4) {
-    const enc1 = BASE64_CHARS.indexOf(normalized[i]);
-    const enc2 = BASE64_CHARS.indexOf(normalized[i + 1]);
-    const enc3 = BASE64_CHARS.indexOf(normalized[i + 2]);
-    const enc4 = BASE64_CHARS.indexOf(normalized[i + 3]);
-    const chr1 = (enc1 << 2) | (enc2 >> 4);
-    const chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
-    const chr3 = ((enc3 & 3) << 6) | enc4;
-
-    bytes[byteIndex++] = chr1;
-    if (enc3 !== 64 && byteIndex < byteLength) {
-      bytes[byteIndex++] = chr2;
-    }
-    if (enc4 !== 64 && byteIndex < byteLength) {
-      bytes[byteIndex++] = chr3;
-    }
-  }
-
-  return bytes;
-};
+import { base64ToBytes, bytesToBase64 } from '@/utils/escPosBase64';
 
 const ESC = 0x1b;
 const SELECT_BIT_IMAGE_MODE = [ESC, 0x2a, 33];
@@ -263,29 +233,101 @@ const decodeImageBytes = (
 };
 
 /** One 24-row raster "band" — a complete, self-contained ESC/POS image command
- * (mode select + width + pixel data + line feed). Never split across two bands. */
-const buildRasterBands = (pixels: number[][], width: number): number[][] => {
-  const bands: number[][] = [];
+ * (mode select + width + pixel data + line feed). Never split across two bands.
+ * An all-white band is returned as just the line feed: with line spacing set to 24
+ * dots (SET_LINE_SPACE_24) a bare LF advances the paper exactly as far as a blank
+ * image band followed by its LF, without sending ~1KB of zero bytes over Bluetooth. */
+const buildRasterBands = (
+  pixels: number[][],
+  width: number,
+): { bytes: number[]; blank: boolean }[] => {
+  const bands: { bytes: number[]; blank: boolean }[] = [];
   for (let y = 0; y < pixels.length; y += 24) {
     const band: number[] = [...SELECT_BIT_IMAGE_MODE, width & 0xff, (width >> 8) & 0xff];
+    let ink = false;
     for (let x = 0; x < width; x++) {
-      band.push(...recollectSlice(y, x, pixels));
+      const slice = recollectSlice(y, x, pixels);
+      if (slice[0] || slice[1] || slice[2]) {
+        ink = true;
+      }
+      band.push(...slice);
     }
     band.push(...LINE_FEED);
-    bands.push(band);
+    bands.push(ink ? { bytes: band, blank: false } : { bytes: [...LINE_FEED], blank: true });
   }
   return bands;
+};
+
+/** Merges each run of blank bands (bare line feeds) onto the END of the write before
+ * it, so they cost no extra Bluetooth write or pacing delay. Never at the start of a
+ * write — some printers glitch on a write's leading bytes (see GLITCH_GUARD_BYTES). */
+const groupBandsForSending = (bands: { bytes: number[]; blank: boolean }[]): number[][] => {
+  const groups: number[][] = [];
+  for (const band of bands) {
+    const last = groups[groups.length - 1];
+    if (band.blank && last) {
+      last.push(...band.bytes);
+    } else {
+      groups.push([...band.bytes]);
+    }
+  }
+  return groups;
+};
+
+/** Crops away blank (no-ink) rows and columns around the image. Logos are often
+ * saved with a transparent or white margin — every blank 24-row band of it still
+ * feeds paper, which shows up as a big gap between the logo and the company name.
+ * Returns the grid unchanged when it has no ink at all. */
+const trimBlankEdges = (pixels: number[][]): { pixels: number[][]; width: number } => {
+  const height = pixels.length;
+  const width = height > 0 ? pixels[0].length : 0;
+  let top = -1;
+  let bottom = -1;
+  let left = width;
+  let right = -1;
+  for (let y = 0; y < height; y++) {
+    const row = pixels[y];
+    for (let x = 0; x < width; x++) {
+      if (row[x]) {
+        if (top === -1) {
+          top = y;
+        }
+        bottom = y;
+        if (x < left) {
+          left = x;
+        }
+        if (x > right) {
+          right = x;
+        }
+      }
+    }
+  }
+  if (top === -1) {
+    return { pixels, width };
+  }
+  const cropped = pixels.slice(top, bottom + 1).map(row => row.slice(left, right + 1));
+  return { pixels: cropped, width: right - left + 1 };
+};
+
+export type RasterImageOptions = {
+  /** Crop blank margins before printing — for the small logo only, never for a
+   * full-receipt image or the title image, whose margins are part of the layout. */
+  trimBlankEdges?: boolean;
 };
 
 const prepareRasterBands = (
   imageBase64: string,
   maxWidth: number,
+  options?: RasterImageOptions,
 ): number[][] => {
   const bytes = base64ToBytes(imageBase64);
   const decoded = decodeImageBytes(bytes);
   const resized = resizeRgba(decoded.data, decoded.width, decoded.height, maxWidth);
-  const pixels = buildPixelGrid(resized.data, resized.width, resized.height);
-  return buildRasterBands(pixels, resized.width);
+  const grid = buildPixelGrid(resized.data, resized.width, resized.height);
+  const { pixels, width } = options?.trimBlankEdges
+    ? trimBlankEdges(grid)
+    : { pixels: grid, width: resized.width };
+  return groupBandsForSending(buildRasterBands(pixels, width));
 };
 
 /**
@@ -317,8 +359,9 @@ export const buildEscPosRasterBase64FromImage = (
 export const buildEscPosRasterBandsBase64FromImage = (
   imageBase64: string,
   maxWidth = 384,
+  options?: RasterImageOptions,
 ): string[] => {
-  const bands = prepareRasterBands(imageBase64, maxWidth);
+  const bands = prepareRasterBands(imageBase64, maxWidth, options);
   const header = [...GLITCH_GUARD_BYTES, ...SET_LINE_SPACE_24, ...CENTER_ALIGN];
   const footer = [...SET_LINE_SPACE_AFTER_LOGO, ...LINE_FEED];
 

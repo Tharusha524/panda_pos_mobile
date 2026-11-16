@@ -1,6 +1,7 @@
 import {
   InteractionManager,
   PermissionsAndroid,
+  PixelRatio,
   Platform,
   Share,
 } from 'react-native';
@@ -16,6 +17,7 @@ import { formatReceiptQtyDetail, resolveLineUom } from '@/utils/uom';
 import type { SaleReceiptPayload } from '@/types/sales';
 import type { PurchaseReceiptPayload } from '@/types/inventory';
 import type { ChequeReturnReceiptPayload, PaymentReceiptPayload } from '@/types/customers';
+import type { ReceiptPaperWidth } from '@/types/receiptPrint';
 
 export type ReceiptCaptureRef = RefObject<ViewShotRef | null>;
 
@@ -107,6 +109,83 @@ export async function captureFromViewShotRef(
       }
     } catch (error) {
       lastError = error;
+      await new Promise<void>(resolve => setTimeout(resolve, 400));
+    }
+  }
+
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+  throw new Error('Could not capture receipt image. Scroll to the top and try again.');
+}
+
+// Printer dots across the paper at 203dpi (must match FULL_RECEIPT_RASTER_WIDTH_PX
+// in bluetoothPrintService). The print capture is taken at 2x this — enough for the
+// box-filter downscale to keep thin strokes ("i", "t") — instead of the phone's full
+// screen resolution, which is ~3x wider and ~9x the pixels to decode in JS.
+const PRINT_CAPTURE_DOTS: Record<ReceiptPaperWidth, number> = {
+  '58mm': 384,
+  '80mm': 576,
+};
+const PRINT_CAPTURE_OVERSAMPLE = 2;
+
+const measureView = (node: ViewShotRef): Promise<{ width: number; height: number } | null> =>
+  new Promise(resolve => {
+    try {
+      node.measure((_x, _y, width, height) =>
+        resolve(width > 0 && height > 0 ? { width, height } : null),
+      );
+    } catch {
+      resolve(null);
+    }
+  });
+
+/** Capture for the "print receipt as image" path only — sized for the printer, not
+ * the screen, so the JS raster conversion has far fewer pixels to process. Never
+ * upscales, and falls back to a full-size capture if the view can't be measured.
+ * Sharing/saving keeps using the full-resolution captures above. */
+export async function captureReceiptForPrint(
+  viewShotRef: ReceiptCaptureRef,
+  paperWidth: ReceiptPaperWidth,
+): Promise<string> {
+  await waitForReceiptLayout();
+
+  const node = viewShotRef.current;
+  if (!node) {
+    throw new Error('Receipt is not ready. Wait a moment and try again.');
+  }
+
+  const size = await measureView(node);
+  let sizeOptions: { width: number; height: number } | null = null;
+  if (size) {
+    const ratio = PixelRatio.get();
+    const nativeWidth = Math.round(size.width * ratio);
+    const nativeHeight = Math.round(size.height * ratio);
+    const targetWidth = Math.min(
+      nativeWidth,
+      PRINT_CAPTURE_DOTS[paperWidth] * PRINT_CAPTURE_OVERSAMPLE,
+    );
+    if (targetWidth < nativeWidth) {
+      sizeOptions = {
+        width: targetWidth,
+        height: Math.max(1, Math.round((nativeHeight * targetWidth) / nativeWidth)),
+      };
+    }
+  }
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await captureRef(node, {
+        format: 'png',
+        quality: 1,
+        result: 'base64',
+        ...(sizeOptions ?? {}),
+      });
+    } catch (error) {
+      lastError = error;
+      // A resize can fail on odd sizes — retry at full size so printing still works.
+      sizeOptions = null;
       await new Promise<void>(resolve => setTimeout(resolve, 400));
     }
   }

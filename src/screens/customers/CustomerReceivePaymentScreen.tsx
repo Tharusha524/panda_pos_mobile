@@ -32,7 +32,7 @@ import {
   buildPrintHeaderFromSettings,
   getReceiptPrintCustomization,
 } from '@/utils/receiptPrintCustomization';
-import { captureReceiptBase64 } from '@/utils/receiptImageShare';
+import { captureReceiptForPrint } from '@/utils/receiptImageShare';
 import { formatCurrency } from '@/utils/format';
 import {
   colors,
@@ -225,7 +225,10 @@ export const CustomerReceivePaymentScreen: React.FC = () => {
       try {
         const customization = await getReceiptPrintCustomization(settings);
         if (customization.printAsImage) {
-          capturedImageBase64 = await captureReceiptBase64(statementShotRef);
+          capturedImageBase64 = await captureReceiptForPrint(
+            statementShotRef,
+            customization.paperWidth,
+          );
         }
       } catch {
         // Couldn't read the setting or capture the preview — fall back to the

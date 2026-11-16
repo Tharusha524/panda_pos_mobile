@@ -61,6 +61,14 @@ const stripLeadingPrinterInit = (base64: string): string => {
 // any thermal printer, unlike a real command, so even if the glitch lands there
 // instead, nothing visible prints.
 const RISKY_COMMAND_SEQUENCES: readonly number[][] = [
+  // The same glitch also hits two plain commands, which is why a stray "2" still
+  // printed before the company name: EPToolkit sends ESC 2 (default line spacing,
+  // bytes 27 50) right before the first line and again after every line, and
+  // ESC a 1 for <C>. When the printer swallows the ESC, its parameter byte prints
+  // as text (50 is "2", 97 is "a"). Byte 27 never occurs inside printable
+  // UTF-8/CP437 text, so these only ever match real commands.
+  [27, 50], // ESC 2 default line spacing (the stray "2")
+  [27, 97, 1], // <C> centre / normal title font (the stray "a")
   [27, 97, 1, 27, 33, 32, 28, 33, 4], // <CD> large title font
   [27, 97, 1, 27, 33, 48, 28, 33, 12], // <CB> bold title font
   [27, 97, 1, 27, 33, 16, 28, 33, 8], // <CM> medium title font
